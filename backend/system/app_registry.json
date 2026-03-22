@@ -1,0 +1,15 @@
+{
+  "apps": {
+    "chrome":        { "executable": "google-chrome",  "process": "chrome",           "category": "browser"   },
+    "google chrome": { "executable": "google-chrome",  "process": "chrome",           "category": "browser"   },
+    "firefox":       { "executable": "firefox",         "process": "firefox",          "category": "browser"   },
+    "terminal":      { "executable": "gnome-terminal",  "process": "gnome-terminal",   "category": "terminal"  },
+    "files":         { "executable": "nautilus",         "process": "nautilus",         "category": "files"     },
+    "file manager":  { "executable": "nautilus",         "process": "nautilus",         "category": "files"     },
+    "nautilus":      { "executable": "nautilus",         "process": "nautilus",         "category": "files"     },
+    "vlc":           { "executable": "vlc",              "process": "vlc",              "category": "media"     },
+    "spotify":       { "executable": "spotify",          "process": "spotify",          "category": "media"     },
+    "vscode":        { "executable": "code",             "process": "code",             "category": "editor"    },
+    "vs code":       { "executable": "code",             "process": "code",             "category": "editor"    }
+  }
+}

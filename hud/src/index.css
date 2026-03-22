@@ -1,0 +1,116 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Share+Tech+Mono&family=Exo+2:wght@300;400;600&display=swap');
+
+:root {
+  --bg-primary:      #010d1a;
+  --bg-panel:        #050f1c;
+  --bg-panel-hover:  #0a1a2e;
+  --border-color:    #0a3a5a;
+  --border-glow:     #0066aa;
+  --text-primary:    #c8e8ff;
+  --text-secondary:  #4a8aaa;
+  --text-label:      #2a5a7a;
+  --accent-cyan:     #00aaff;
+  --accent-green:    #00ff88;
+  --accent-red:      #ff3344;
+  --accent-orange:   #ff8800;
+  --font-main:       'Share Tech Mono', 'Courier New', monospace;
+  --font-orb:        'Orbitron', sans-serif;
+  --font-size-base:  11px;
+  --panel-padding:   12px;
+  --border-radius:   2px;
+}
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg-primary);
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+  font-family: var(--font-main);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 2px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
+
+/* ── Standard panel ── */
+.jp {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  font-family: var(--font-main);
+  font-size: var(--font-size-base);
+  color: var(--text-primary);
+  padding: var(--panel-padding);
+  transition: border-color 0.2s ease;
+  width: 100%;
+}
+.jp:hover { border-color: var(--border-glow); }
+
+/* ── Panel title ── */
+.jp-title {
+  font-family: var(--font-orb);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  color: var(--text-label);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+/* ── Keyframes ── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.65; transform: scale(1.3); }
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+@keyframes cornerPulse {
+  0%, 100% { opacity: 0.4; }
+  50%       { opacity: 0.95; }
+}
+@keyframes bootScan {
+  0%   { top: -4px; opacity: 1; }
+  100% { top: 100vh; opacity: 0; }
+}
+@keyframes tickerScroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideInLeft {
+  from { transform: translateX(-20px); opacity: 0; }
+  to   { transform: translateX(0);      opacity: 1; }
+}
+@keyframes clockFlicker {
+  0%, 89%, 100% { opacity: 1; }
+  91%, 96%      { opacity: 0.72; }
+}
+
+/* Input placeholders */
+input::placeholder {
+  color: var(--text-label);
+  font-family: var(--font-main);
+  opacity: 0.7;
+}

@@ -1,0 +1,23 @@
+[Unit]
+Description=JARVIS-MKIII Backend
+After=network.target ollama.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=kiko
+WorkingDirectory=/home/kiko/JARVIS_MKIII/backend
+ExecStart=/home/kiko/JARVIS_MKIII/venv/bin/python3 -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONPATH=/home/kiko/JARVIS_MKIII/backend
+Environment=DISPLAY=:1
+# Set your vault master password here so the service can unlock secrets without
+# an interactive prompt. Example: JARVIS_VAULT_PASSWORD=your_master_password
+# Alternatively, write the password to ~/JARVIS_MKIII/.vault_pass (chmod 600)
+# and leave this blank — the vault will read it from that file automatically.
+Environment=JARVIS_VAULT_PASSWORD=
+
+[Install]
+WantedBy=multi-user.target
