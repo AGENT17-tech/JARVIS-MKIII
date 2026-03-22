@@ -53,7 +53,15 @@
       "Bash(pip show:*)",
       "Bash(pip install:*)",
       "Bash(python3 -c \"from ddgs import DDGS; r = list\\(DDGS\\(\\).text\\(''''python asyncio'''', max_results=2\\)\\); print\\(r[0][''''title''''] if r else ''''no results''''\\)\")",
-      "Bash(python3 -c \":*)"
+      "Bash(python3 -c \":*)",
+      "Bash(find /home/k/JARVIS-MKIII/backend -name intent_router* -o -name *intent*)",
+      "Bash(dpkg -l)",
+      "Bash(echo \"exit $?\")",
+      "Bash(sudo apt-get:*)",
+      "Bash(apt-get install:*)",
+      "Bash(python -c \"import system.desktop_control; print\\(''desktop_control OK''\\)\")",
+      "Bash(python -c \"import system.intent_router; print\\(''intent_router OK''\\)\")",
+      "Bash(dpkg -l xdotool wmctrl scrot)"
     ]
   }
 }

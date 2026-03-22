@@ -42,6 +42,10 @@ from api.voice_bridge import voice_router, request_speak
 from api.weather_calendar import weather_router
 from system.intent_router import parse_intent
 from system.app_controller import launch_app, close_app, list_open_apps
+from system.desktop_control import (
+    take_screenshot, type_text, press_shortcut,
+    youtube_control, get_time_date,
+)
 from system.terminal_controller import (
     execute, smart_install, remove_package, update_system, format_result,
 )
@@ -322,6 +326,56 @@ async def _handle_browser_action(text: str) -> str:
     return "I couldn't determine the browser action, sir. Could you be more specific?"
 
 
+def _extract_type_text(prompt: str) -> str | None:
+    """Extract the text to type from a 'type ...' voice command."""
+    import re
+    # "type the text hello world" / "type 'hello world'" / "type hello world"
+    m = re.search(
+        r'\btype\s+(?:the\s+)?(?:text\s+|phrase\s+|word\s+|command\s+)?["\']?(.+?)["\']?\s*$',
+        prompt, re.IGNORECASE,
+    )
+    return m.group(1).strip() if m else None
+
+
+def _extract_shortcut(prompt: str) -> str | None:
+    """
+    Extract a keyboard shortcut from natural language.
+    "press ctrl s"          → "ctrl+s"
+    "press ctrl+alt+t"      → "ctrl+alt+t"
+    "press f5"              → "f5"
+    "press enter"           → "enter"
+    "keyboard shortcut ctrl shift p" → "ctrl+shift+p"
+    """
+    import re
+    lo = prompt.lower().strip()
+
+    # Try explicit shortcut after press/hit/hotkey/keyboard shortcut
+    m = re.search(
+        r'\b(?:press|hit|hotkey|keyboard\s+shortcut)\s+(?:the\s+)?(?:keys?\s+)?(.+)',
+        lo, re.IGNORECASE,
+    )
+    if m:
+        raw = m.group(1).strip().rstrip(".,!?")
+        # Normalise spaces between tokens to "+"
+        # "ctrl s" → "ctrl+s",  "ctrl alt t" → "ctrl+alt+t"
+        parts = re.split(r'[+\s]+', raw)
+        parts = [p for p in parts if p]
+        return "+".join(parts)
+    return None
+
+
+def _extract_youtube_action(prompt: str) -> str:
+    """Extract YouTube action keyword from the prompt."""
+    import re
+    lo = prompt.lower()
+    for keyword in ("pause", "play", "mute", "unmute", "fullscreen", "full screen",
+                    "next", "previous", "forward", "rewind", "volume up", "volume down",
+                    "captions", "subtitles"):
+        if keyword in lo:
+            return keyword
+    return "pause"  # safe default
+
+
 async def _spawn_agent(agent_name: str, task: str) -> str:
     try:
         agent_id = await agent_dispatcher.spawn(agent_name, task)
@@ -482,6 +536,77 @@ async def chat(req: ChatRequest):
         # ── Diagnostics ───────────────────────────────────────────────────────
         if action == "diagnostic":
             response_text = await _handle_diagnostic_voice()
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            if session_id != "voice-pipeline":
+                await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        # ── Time / date ───────────────────────────────────────────────────────
+        if action == "time_date":
+            result = get_time_date()
+            response_text = result["result"]
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            if session_id != "voice-pipeline":
+                await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        # ── Desktop screenshot ────────────────────────────────────────────────
+        if action == "screenshot":
+            result = await asyncio.to_thread(take_screenshot)
+            if result["success"]:
+                response_text = f"Done, sir. {result['result']}"
+            else:
+                response_text = f"Screenshot failed, sir. {result.get('error', 'Unknown error')}"
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            if session_id != "voice-pipeline":
+                await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        # ── Type text ─────────────────────────────────────────────────────────
+        if action == "type_text":
+            text_to_type = _extract_type_text(req.prompt)
+            if text_to_type:
+                result = await asyncio.to_thread(type_text, text_to_type)
+                if result["success"]:
+                    response_text = f"Done, sir. {result['result']}"
+                else:
+                    response_text = f"That did not work, sir. {result.get('error', 'xdotool unavailable')}"
+            else:
+                response_text = "What would you like me to type, sir?"
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            if session_id != "voice-pipeline":
+                await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        # ── Press shortcut / key ──────────────────────────────────────────────
+        if action == "press_key":
+            shortcut = _extract_shortcut(req.prompt)
+            if shortcut:
+                result = await asyncio.to_thread(press_shortcut, shortcut)
+                if result["success"]:
+                    response_text = f"Done, sir. {result['result']}"
+                else:
+                    response_text = f"That did not work, sir. {result.get('error', 'xdotool unavailable')}"
+            else:
+                response_text = "Which key or shortcut should I press, sir?"
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            if session_id != "voice-pipeline":
+                await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        # ── YouTube control ───────────────────────────────────────────────────
+        if action == "youtube":
+            yt_action = _extract_youtube_action(req.prompt)
+            result    = await asyncio.to_thread(youtube_control, yt_action)
+            if result["success"]:
+                response_text = f"Done, sir. {result['result']}"
+            else:
+                response_text = f"That did not work, sir. {result.get('error', 'xdotool unavailable')}"
             memory.record(session_id, "user",      req.prompt,    tier="voice")
             memory.record(session_id, "assistant", response_text, tier="voice")
             if session_id != "voice-pipeline":

@@ -256,6 +256,53 @@ _DIAGNOSTIC_PATS = [
     r'\bdiagnostic\s+report\b',
 ]
 
+# ── Time / date ───────────────────────────────────────────────────────────────
+_TIME_PATS = [
+    r'\bwhat\s+(time|date)\s+is\s+it\b',
+    r'\bwhat.s\s+the\s+(time|date)\b',
+    r'\btell\s+me\s+the\s+(time|date)\b',
+    r'\bcurrent\s+(time|date)\b',
+    r'\bwhat\s+day\s+is\s+(it|today)\b',
+    r'\bwhat.s\s+today.s\s+date\b',
+    r'\bwhat\s+is\s+today.s\s+date\b',
+    r'\bwhat\s+is\s+the\s+time\b',
+    r'\bwhat\s+is\s+the\s+date\b',
+]
+
+# ── Screenshot (direct — save to ~/Pictures/jarvis/) ──────────────────────────
+_SCREENSHOT_PATS = [
+    r'\btake\s+(a\s+)?screenshot\b',
+    r'\bscreenshot\b',
+    r'\bcapture\s+(the\s+)?(screen|desktop)\b',
+    r'\bsnap\s+(the\s+)?(screen|desktop)\b',
+]
+
+# ── Type text (direct xdotool) ────────────────────────────────────────────────
+_TYPE_TEXT_PATS = [
+    r'\btype\s+.{2,}',
+    r'\bwrite\s+.{2,}\s+(?:here|now)\b',
+]
+
+# ── Press key / shortcut (direct xdotool) ─────────────────────────────────────
+_PRESS_KEY_PATS = [
+    r'\bpress\s+(?:the\s+)?(?:keys?\s+)?(?:ctrl|alt|shift|win|super|f\d+|enter|escape|esc|tab|space|backspace|delete)\b',
+    r'\bpress\s+ctrl\b',
+    r'\bpress\s+alt\b',
+    r'\bpress\s+f\d+\b',
+    r'\bpress\s+(?:the\s+)?(?:key\s+)?(?:ctrl|alt)\s*[+\s]\s*\S',
+    r'\bhit\s+(?:the\s+)?(?:enter|escape|esc|tab|space|ctrl|alt|f\d+)\b',
+    r'\bkeyboard\s+shortcut\b',
+]
+
+# ── YouTube browser control ────────────────────────────────────────────────────
+_YOUTUBE_PATS = [
+    r'\b(pause|play|mute|unmute|fullscreen|full\s+screen)\s+youtube\b',
+    r'\byoutube\s+(pause|play|mute|unmute|fullscreen|full\s+screen|next|previous|forward|rewind)\b',
+    r'\b(pause|play)\s+(?:the\s+)?video\b',
+    r'\bmute\s+(?:the\s+)?(?:video|tab|browser)\b',
+    r'\byoutube\b.{0,30}\b(pause|play|mute|stop|fullscreen)\b',
+]
+
 # ── Desktop automation (AutoGUI) ──────────────────────────────────────────────
 _AUTOGUI_PATS = [
     r'\bclick\s+on\b',
@@ -357,8 +404,13 @@ def _os_intent_match(text: str) -> tuple[str | None, str | None]:
     # Vision and autogui checked first — their patterns are specific and
     # would otherwise be swallowed by broader file/browser patterns
     # (e.g. "move the mouse to..." matches the file "move...to" pattern).
-    if _pat_match(_DIAGNOSTIC_PATS, text): return "diagnostic",   text
+    if _pat_match(_DIAGNOSTIC_PATS,  text): return "diagnostic",  text
     if _pat_match(_MISSION_PATS,    text): return "mission",      text
+    if _pat_match(_TIME_PATS,       text): return "time_date",    text
+    if _pat_match(_SCREENSHOT_PATS, text): return "screenshot",   text
+    if _pat_match(_TYPE_TEXT_PATS,  text): return "type_text",    text
+    if _pat_match(_PRESS_KEY_PATS,  text): return "press_key",    text
+    if _pat_match(_YOUTUBE_PATS,    text): return "youtube",      text
     if _pat_match(_VISION_PATS,     text): return "vision",       text
     if _pat_match(_AUTOGUI_PATS,    text): return "autogui",      text
     if _pat_match(_FILE_PATS,       text): return "file",         text
@@ -435,10 +487,15 @@ async def parse_intent(text: str) -> tuple[str | None, str | None]:
       "dev"                — developer agent   (payload = original text)
       "code"               — code agent        (payload = original text)
       "organize"           — file agent        (payload = original text)
-      "vision"             — vision agent      (payload = original text)
-      "autogui"            — autogui agent     (payload = original text)
-      "mission"            — mission board     (payload = original text)
-      "diagnostic"         — system diagnostic (payload = original text)
+      "time_date"          — time/date query    (payload = original text)
+      "screenshot"         — desktop screenshot (payload = original text)
+      "type_text"          — type text directly (payload = original text)
+      "press_key"          — press shortcut     (payload = original text)
+      "youtube"            — YouTube control    (payload = original text)
+      "vision"             — vision agent       (payload = original text)
+      "autogui"            — autogui agent      (payload = original text)
+      "mission"            — mission board      (payload = original text)
+      "diagnostic"         — system diagnostic  (payload = original text)
       "mcp_brave"          — Brave web search  (payload = original text)
       "mcp_github"         — GitHub query      (payload = original text)
       "mcp_fetch"          — web fetch         (payload = original text)
