@@ -18,14 +18,6 @@ const EMAILS = [
   { id:5, from:'Dr. Ahmed Sayed',      subject:'RE: Research supervision — follow up',      time:'2d ago', unread:false, priority:'MEDIUM', tag:'IEEE'    },
 ]
 
-const CALENDAR = [
-  { time:'10:00', title:'Enactus team standup',     type:'MEETING',  color:'#00ffc8' },
-  { time:'13:00', title:'IEEE writing session',     type:'WORK',     color:'#00d4ff' },
-  { time:'15:30', title:'JARVIS: voice pipeline fix', type:'WORK',  color:'#00d4ff' },
-  { time:'18:00', title:'Gym — pull day',           type:'FITNESS',  color:'#ffb900' },
-  { time:'21:00', title:'Deep work block',          type:'FOCUS',    color:'#aa88ff' },
-]
-
 const DISCORD_MSGS = [
   { server:'JARVIS Dev', channel:'general',  user:'System', msg:'Voice pipeline up 99.1% uptime this week', time:'11m' },
   { server:'IEEE Egypt', channel:'collab',   user:'@Nour',  msg:'Did you get the template from last year\'s winners?', time:'44m' },
@@ -36,9 +28,34 @@ const TAG_COLORS = { IEEE:'#00d4ff', JARVIS:'#00ffc8', ENACTUS:'#ffb900', LEARNI
 const PRIORITY_COLORS = { HIGH:'#ff6644', MEDIUM:'#ffb900', LOW:'rgba(0,140,200,0.45)' }
 
 export default function CommsTab() {
-  const [activeEmail, setActiveEmail] = useState(null)
-  const [summary, setSummary]         = useState(null)
-  const [summarising, setSummarising] = useState(false)
+  const [activeEmail, setActiveEmail]   = useState(null)
+  const [summary, setSummary]           = useState(null)
+  const [summarising, setSummarising]   = useState(false)
+  const [calEvents, setCalEvents]       = useState([])
+  const [calError, setCalError]         = useState(null)
+  const [calConfigured, setCalConfigured] = useState(true)
+  const [calLoading, setCalLoading]     = useState(true)
+
+  // Fetch Google Calendar events on mount and every 5 minutes
+  useEffect(() => {
+    const fetchCalendar = async () => {
+      try {
+        const res  = await fetch(`${API}/gcal/events`)
+        const data = await res.json()
+        setCalEvents(data.events || [])
+        setCalError(data.error || null)
+        setCalConfigured(data.configured !== false)
+      } catch {
+        setCalError('Backend offline')
+        setCalEvents([])
+      } finally {
+        setCalLoading(false)
+      }
+    }
+    fetchCalendar()
+    const id = setInterval(fetchCalendar, 5 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [])
 
   const summariseInbox = async () => {
     setSummarising(true)
@@ -63,6 +80,17 @@ export default function CommsTab() {
   }
 
   const unreadCount = EMAILS.filter(e => e.unread).length
+
+  // Determine which calendar events are upcoming vs past
+  const now = new Date()
+  const isEventPast = (timeStr) => {
+    if (!timeStr || timeStr === 'All day') return false
+    const [h, m] = timeStr.split(':').map(Number)
+    return now.getHours() > h || (now.getHours() === h && now.getMinutes() > m)
+  }
+
+  // Find the next upcoming event
+  const nextEvent = calEvents.find(e => !isEventPast(e.time) && e.time !== 'All day')
 
   return (
     <div style={{ height:'100%', overflow:'hidden', padding:'10px 14px', display:'grid', gridTemplateColumns:'1fr 300px', gap:10 }}>
@@ -142,44 +170,94 @@ export default function CommsTab() {
 
       {/* Right — Calendar */}
       <div style={{ ...T.panel, padding:'14px 18px', display:'flex', flexDirection:'column', overflow:'hidden' }}>
-        <div style={{ ...T.title, marginBottom:10 }}>◇ TODAY'S SCHEDULE</div>
-        <div style={{ ...T.dim, marginBottom:12, fontSize:8 }}>{new Date().toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}</div>
-        <div style={{ flex:1, overflowY:'auto', scrollbarWidth:'none', display:'flex', flexDirection:'column', gap:6 }}>
-          {CALENDAR.map((e,i) => {
-            const now = new Date()
-            const [h,m] = e.time.split(':').map(Number)
-            const past = now.getHours() > h || (now.getHours() === h && now.getMinutes() > m)
-            return (
-              <div key={i} style={{ display:'flex', gap:10, alignItems:'flex-start', opacity: past?0.45:1 }}>
-                <div style={{ flexShrink:0, textAlign:'right', minWidth:36 }}>
-                  <div style={{ fontFamily:'Share Tech Mono', fontSize:9, color:'rgba(0,212,255,0.6)' }}>{e.time}</div>
-                </div>
-                <div style={{ width:2, alignSelf:'stretch', background:e.color, flexShrink:0, borderRadius:1 }}/>
-                <div>
-                  <div style={{ fontFamily:'Share Tech Mono', fontSize:10, color:'rgba(160,215,255,0.88)' }}>{e.title}</div>
-                  <div style={{ fontFamily:'Orbitron', fontSize:6, color:e.color, letterSpacing:1.5, marginTop:2 }}>{e.type}</div>
-                </div>
-              </div>
-            )
-          })}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+          <div style={{ ...T.title }}>◇ TODAY'S SCHEDULE</div>
+          {/* Live indicator */}
+          {calConfigured && !calError && (
+            <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+              <div style={{ width:5, height:5, borderRadius:'50%', background:'#00ffc8', boxShadow:'0 0 6px #00ffc8' }}/>
+              <span style={{ fontFamily:'Orbitron', fontSize:6, color:'rgba(0,255,200,0.6)', letterSpacing:1 }}>LIVE</span>
+            </div>
+          )}
         </div>
 
-        <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(0,212,255,0.1)' }}>
-          <div style={{ ...T.dim, marginBottom:6 }}>NEXT 7 DAYS</div>
-          {[
-            { day:'Tomorrow',  count:3 },
-            { day:'Wednesday', count:2 },
-            { day:'Thursday',  count:4 },
-          ].map((d,i) => (
-            <div key={i} style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
-              <span style={{ ...T.body, fontSize:9 }}>{d.day}</span>
-              <span style={{ fontFamily:'Orbitron', fontSize:9, color:'rgba(0,212,255,0.55)' }}>{d.count} events</span>
-            </div>
-          ))}
-          <div style={{ marginTop:6, padding:'6px 10px', background:'rgba(0,212,255,0.04)', borderRadius:2, border:'1px solid rgba(0,212,255,0.08)' }}>
-            <div style={{ ...T.dim, fontSize:7 }}>CALENDAR SYNC</div>
-            <div style={{ ...T.dim, fontSize:7, color:'rgba(255,90,60,0.6)', marginTop:2 }}>Google Calendar integration pending</div>
+        <div style={{ ...T.dim, marginBottom:12, fontSize:8 }}>
+          {now.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}
+        </div>
+
+        {/* Next event highlight */}
+        {nextEvent && (
+          <div style={{ marginBottom:10, padding:'8px 10px', background:'rgba(0,255,200,0.04)', borderRadius:2, border:'1px solid rgba(0,255,200,0.15)' }}>
+            <div style={{ fontFamily:'Orbitron', fontSize:6, color:'rgba(0,255,200,0.55)', letterSpacing:1.5, marginBottom:3 }}>NEXT EVENT</div>
+            <div style={{ fontFamily:'Share Tech Mono', fontSize:10, color:'rgba(0,255,200,0.9)' }}>{nextEvent.title}</div>
+            <div style={{ fontFamily:'Share Tech Mono', fontSize:8, color:'rgba(0,212,255,0.5)', marginTop:2 }}>{nextEvent.time}{nextEvent.location ? ` · ${nextEvent.location}` : ''}</div>
           </div>
+        )}
+
+        {/* Event list */}
+        <div style={{ flex:1, overflowY:'auto', scrollbarWidth:'none', display:'flex', flexDirection:'column', gap:6 }}>
+          {calLoading ? (
+            <div style={{ ...T.dim, fontSize:8, textAlign:'center', marginTop:20 }}>SYNCING...</div>
+          ) : !calConfigured ? (
+            <div style={{ padding:'10px 0' }}>
+              <div style={{ ...T.dim, fontSize:8, color:'rgba(255,90,60,0.7)', marginBottom:4 }}>NOT CONFIGURED</div>
+              <div style={{ fontFamily:'Share Tech Mono', fontSize:8, color:'rgba(160,215,255,0.5)', lineHeight:1.6 }}>
+                Place credentials.json in backend/config/ to enable Google Calendar.
+              </div>
+            </div>
+          ) : calError ? (
+            <div style={{ ...T.dim, fontSize:8, color:'rgba(255,90,60,0.6)', marginTop:10 }}>
+              ERROR: {calError.slice(0,60)}
+            </div>
+          ) : calEvents.length === 0 ? (
+            <div style={{ ...T.dim, fontSize:9, textAlign:'center', marginTop:20, color:'rgba(0,212,255,0.35)' }}>
+              No events today
+            </div>
+          ) : (
+            calEvents.map((e, i) => {
+              const past = isEventPast(e.time)
+              return (
+                <div key={e.id || i} style={{ display:'flex', gap:10, alignItems:'flex-start', opacity: past ? 0.4 : 1, transition:'opacity 0.3s' }}>
+                  <div style={{ flexShrink:0, textAlign:'right', minWidth:44 }}>
+                    <div style={{ fontFamily:'Share Tech Mono', fontSize:9, color:'rgba(0,212,255,0.6)' }}>{e.time}</div>
+                  </div>
+                  <div style={{ width:2, alignSelf:'stretch', background: e.color || '#00d4ff', flexShrink:0, borderRadius:1 }}/>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontFamily:'Share Tech Mono', fontSize:10, color:'rgba(160,215,255,0.88)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{e.title}</div>
+                    <div style={{ display:'flex', gap:6, marginTop:2, alignItems:'center' }}>
+                      <div style={{ fontFamily:'Orbitron', fontSize:6, color: e.color || '#00d4ff', letterSpacing:1.5 }}>{e.type}</div>
+                      {e.location && (
+                        <div style={{ fontFamily:'Share Tech Mono', fontSize:7, color:'rgba(0,140,200,0.5)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:110 }}>
+                          {e.location}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+
+        {/* Status footer */}
+        <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(0,212,255,0.1)' }}>
+          {calConfigured && !calError ? (
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div style={{ ...T.dim, fontSize:7, color:'rgba(0,255,200,0.45)' }}>
+                GOOGLE CALENDAR CONNECTED
+              </div>
+              <div style={{ fontFamily:'Orbitron', fontSize:7, color:'rgba(0,212,255,0.45)' }}>
+                {calEvents.length} EVENTS
+              </div>
+            </div>
+          ) : (
+            <div style={{ padding:'6px 10px', background:'rgba(0,212,255,0.04)', borderRadius:2, border:'1px solid rgba(0,212,255,0.08)' }}>
+              <div style={{ ...T.dim, fontSize:7 }}>CALENDAR SYNC</div>
+              <div style={{ ...T.dim, fontSize:7, color: calConfigured ? 'rgba(255,90,60,0.6)' : 'rgba(255,150,60,0.6)', marginTop:2 }}>
+                {calConfigured ? 'Auth error — check token' : 'Google Calendar integration pending'}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

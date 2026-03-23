@@ -61,7 +61,9 @@
       "Bash(apt-get install:*)",
       "Bash(python -c \"import system.desktop_control; print\\(''desktop_control OK''\\)\")",
       "Bash(python -c \"import system.intent_router; print\\(''intent_router OK''\\)\")",
-      "Bash(dpkg -l xdotool wmctrl scrot)"
+      "Bash(dpkg -l xdotool wmctrl scrot)",
+      "Bash(find /home/k/JARVIS-MKIII/frontend -name *.jsx -o -name *.tsx -o -name *.js -o -name *.ts)",
+      "Bash(python -c \"import google.oauth2.credentials, googleapiclient.discovery, google_auth_oauthlib.flow; print\\(''All packages present''\\)\")"
     ]
   }
 }

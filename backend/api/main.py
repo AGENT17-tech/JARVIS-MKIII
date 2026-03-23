@@ -25,7 +25,7 @@ Endpoints:
 """
 
 from __future__ import annotations
-import asyncio, json, os, uuid, time as _time
+import asyncio, datetime, json, os, uuid, time as _time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -552,6 +552,15 @@ async def chat(req: ChatRequest):
                 await request_speak(response_text)
             return _quick_response(response_text, session_id)
 
+        # ── Google Calendar ───────────────────────────────────────────────────
+        if action == "calendar":
+            response_text = await _handle_calendar_voice()
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            if session_id != "voice-pipeline":
+                await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
         # ── Desktop screenshot ────────────────────────────────────────────────
         if action == "screenshot":
             result = await asyncio.to_thread(take_screenshot)
@@ -1013,6 +1022,48 @@ async def _handle_diagnostic_voice() -> str:
         return " ".join(parts)
     except Exception:
         return "Diagnostic systems available, sir. Run the full report for details."
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GOOGLE CALENDAR HANDLER
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _handle_calendar_voice() -> str:
+    """Return a TTS-safe summary of today's Google Calendar events."""
+    try:
+        from config.google_calendar import get_today_events, is_configured
+        if not is_configured():
+            return (
+                "Google Calendar is not configured yet, sir. "
+                "Please place your credentials file in the backend config directory."
+            )
+        events = await asyncio.to_thread(get_today_events)
+        if not events:
+            return "You have no events scheduled today, sir. Your calendar is clear."
+        n = len(events)
+        # Find next upcoming event
+        now = datetime.datetime.now()
+        upcoming = [
+            e for e in events
+            if not e.get("is_all_day", False)
+        ]
+        parts = [f"You have {n} event{'s' if n != 1 else ''} today, sir."]
+        if upcoming:
+            next_evt = upcoming[0]
+            parts.append(f"Next up: {next_evt['title']} at {next_evt['time']}.")
+        if n > 1:
+            titles = ", ".join(e["title"] for e in events[1:4])
+            remaining = n - 1
+            parts.append(
+                f"Then: {titles}{'...' if n > 4 else ''}."
+                if remaining <= 3
+                else f"Plus {remaining} more events."
+            )
+        return " ".join(parts)
+    except FileNotFoundError:
+        return "Google Calendar credentials not found, sir."
+    except Exception as e:
+        return f"Unable to fetch calendar data, sir. {str(e)[:60]}"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

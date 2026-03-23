@@ -256,6 +256,24 @@ class ProactiveEngine:
         except Exception:
             pass
 
+        # Calendar events
+        calendar_text = ""
+        try:
+            from config.google_calendar import get_today_events, is_configured
+            if is_configured():
+                events = await asyncio.to_thread(get_today_events)
+                if events:
+                    n = len(events)
+                    first = events[0]
+                    calendar_text = (
+                        f"You have {n} calendar event{'s' if n != 1 else ''} today. "
+                        f"First up: {first['title']} at {first['time']}."
+                    )
+                else:
+                    calendar_text = "No calendar events today."
+        except Exception:
+            pass
+
         greeting = (
             "Good morning" if hour < 12
             else ("Good afternoon" if hour < 18 else "Good evening")
@@ -266,6 +284,7 @@ class ProactiveEngine:
         message = " ".join(filter(None, [
             f"{greeting}, sir. It is {time_str} on {date_str}.",
             mission_text,
+            calendar_text,
             weather_text,
             github_text,
             "All systems nominal. Awaiting your orders.",
@@ -277,7 +296,7 @@ class ProactiveEngine:
             priority    = "high",
             title       = "MORNING BRIEFING",
             message     = message,
-            hud_message = " ".join(filter(None, [mission_text, weather_text])) or "Good morning, sir.",
+            hud_message = " ".join(filter(None, [mission_text, calendar_text, weather_text])) or "Good morning, sir.",
         )
         asyncio.create_task(self.fire_alert(alert))
 
@@ -361,9 +380,73 @@ class ProactiveEngine:
     # 3. CALENDAR EVENT ALERTS ─────────────────────────────────────────────────
 
     async def check_calendar_events(self) -> None:
-        # Stub — no calendar event source yet.
-        # When events are available, fire alerts 15 and 5 min before each event.
-        pass
+        """
+        Fetch upcoming events from Google Calendar and fire alerts 15 minutes
+        before each event starts. Alert ID includes the event ID and the
+        15-min slot, so each event only gets one reminder per day.
+        """
+        try:
+            from config.google_calendar import get_upcoming_events, is_configured
+        except ImportError:
+            return
+
+        if not is_configured():
+            return
+
+        try:
+            # Look 16 minutes ahead — the loop runs every 5 min, so we catch
+            # events whose start time falls in the 0–15 minute window.
+            events = await asyncio.to_thread(get_upcoming_events, minutes_ahead=16)
+        except Exception as e:
+            print(f"[PROACTIVE] Calendar fetch failed: {e}")
+            return
+
+        now = datetime.datetime.now()
+
+        for event in events:
+            start_dt = event.get("_start_dt")
+            if start_dt is None:
+                continue
+
+            # Make start_dt offset-naive for comparison if needed
+            if hasattr(start_dt, "tzinfo") and start_dt.tzinfo is not None:
+                try:
+                    import zoneinfo
+                    local_tz  = zoneinfo.ZoneInfo("Africa/Cairo")
+                    start_dt  = start_dt.astimezone(local_tz).replace(tzinfo=None)
+                except Exception:
+                    start_dt = start_dt.replace(tzinfo=None)
+
+            minutes_until = (start_dt - now).total_seconds() / 60
+
+            if not (0 < minutes_until <= 15):
+                continue
+
+            event_id = event.get("id", event.get("title", "unknown"))
+            alert_id = f"calendar_15min_{event_id}_{now.date().isoformat()}"
+            if self._already_spoken(alert_id):
+                continue
+
+            title     = event.get("title", "Untitled Event")
+            time_str  = event.get("time", "")
+            location  = event.get("location", "")
+            mins_int  = max(1, int(minutes_until))
+
+            location_text = f" at {location}" if location else ""
+            msg = (
+                f"Sir, you have '{title}'{location_text} starting in {mins_int} "
+                f"minute{'s' if mins_int != 1 else ''}."
+            )
+            hud_msg = f"{title} — in {mins_int} min{'' if mins_int == 1 else 's'} ({time_str})"
+
+            asyncio.create_task(self.fire_alert(self._make_alert(
+                alert_id    = alert_id,
+                alert_type  = "calendar",
+                priority    = "high",
+                title       = f"UPCOMING — {title[:28].upper()}",
+                message     = msg,
+                hud_message = hud_msg,
+            )))
 
     # 4. SYSTEM ANOMALY ALERTS ─────────────────────────────────────────────────
 

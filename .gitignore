@@ -1,13 +1,7 @@
 venv/
-venv/
-venv/
 backend/config/.vault
-backend/memory/*.db
-backend/memory/*.db-shm
-backend/memory/*.db-wal
-**/__pycache__/
-**/*.pyc
-backend/config/.vault
+backend/config/credentials.json
+backend/config/token.json
 backend/memory/*.db
 backend/memory/*.db-shm
 backend/memory/*.db-wal

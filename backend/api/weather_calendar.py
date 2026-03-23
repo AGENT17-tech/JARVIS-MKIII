@@ -1,10 +1,10 @@
 """
 JARVIS-MKIII — weather_calendar.py
-Endpoints: /weather  /calendar  /forecast  /github
+Endpoints: /weather  /calendar  /forecast  /github  /gcal/events
 """
 
 from __future__ import annotations
-import httpx, datetime, os
+import httpx, datetime, os, asyncio
 from fastapi import APIRouter
 from core.vault import Vault
 from config.settings import LAT, LON, CITY
@@ -73,6 +73,23 @@ async def get_calendar():
         "days_in_month": days_in_month,
         "quarter":       f"Q{(now.month - 1) // 3 + 1}",
     }
+
+
+@weather_router.get("/gcal/events")
+async def get_gcal_events():
+    """Return today's Google Calendar events. Requires OAuth2 setup."""
+    try:
+        from config.google_calendar import get_today_events, is_configured
+        if not is_configured():
+            return {"events": [], "error": "Google Calendar not configured. Place credentials.json in backend/config/.", "configured": False}
+        events = await asyncio.to_thread(get_today_events)
+        # Strip internal datetime objects (not JSON-serialisable)
+        clean = [{k: v for k, v in e.items() if not k.startswith("_")} for e in events]
+        return {"events": clean, "error": None, "configured": True}
+    except FileNotFoundError as e:
+        return {"events": [], "error": str(e), "configured": False}
+    except Exception as e:
+        return {"events": [], "error": str(e), "configured": True}
 
 
 @weather_router.get("/forecast")

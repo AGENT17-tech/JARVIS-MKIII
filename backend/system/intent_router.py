@@ -256,6 +256,25 @@ _DIAGNOSTIC_PATS = [
     r'\bdiagnostic\s+report\b',
 ]
 
+# ── Google Calendar ───────────────────────────────────────────────────────────
+_CALENDAR_PATS = [
+    r"\bwhat.s\s+on\s+my\s+calendar\b",
+    r"\bmy\s+calendar\s+today\b",
+    r"\bcalendar\s+today\b",
+    r"\bany\s+meetings?\s+today\b",
+    r"\bdo\s+i\s+have\s+(any\s+)?meetings?\b",
+    r"\bwhat.s\s+scheduled\b",
+    r"\bmy\s+schedule\b",
+    r"\btoday.s\s+(schedule|agenda|events?|meetings?)\b",
+    r"\bshow\s+(me\s+)?my\s+(calendar|schedule|events?|meetings?)\b",
+    r"\bcheck\s+(my\s+)?(calendar|schedule|events?|meetings?)\b",
+    r"\bwhat\s+(events?|meetings?)\s+(do\s+i\s+have|are\s+(scheduled|on))\b",
+    r"\bupcoming\s+(events?|meetings?)\b",
+    r"\bnext\s+(event|meeting|appointment)\b",
+    r"\bcalendar\s+(check|briefing|update)\b",
+    r"\bagenda\s+for\s+today\b",
+]
+
 # ── Time / date ───────────────────────────────────────────────────────────────
 _TIME_PATS = [
     r'\bwhat\s+(time|date)\s+is\s+it\b',
@@ -406,6 +425,7 @@ def _os_intent_match(text: str) -> tuple[str | None, str | None]:
     # (e.g. "move the mouse to..." matches the file "move...to" pattern).
     if _pat_match(_DIAGNOSTIC_PATS,  text): return "diagnostic",  text
     if _pat_match(_MISSION_PATS,    text): return "mission",      text
+    if _pat_match(_CALENDAR_PATS,   text): return "calendar",     text
     if _pat_match(_TIME_PATS,       text): return "time_date",    text
     if _pat_match(_SCREENSHOT_PATS, text): return "screenshot",   text
     if _pat_match(_TYPE_TEXT_PATS,  text): return "type_text",    text
@@ -487,6 +507,7 @@ async def parse_intent(text: str) -> tuple[str | None, str | None]:
       "dev"                — developer agent   (payload = original text)
       "code"               — code agent        (payload = original text)
       "organize"           — file agent        (payload = original text)
+      "calendar"           — Google Calendar    (payload = original text)
       "time_date"          — time/date query    (payload = original text)
       "screenshot"         — desktop screenshot (payload = original text)
       "type_text"          — type text directly (payload = original text)
