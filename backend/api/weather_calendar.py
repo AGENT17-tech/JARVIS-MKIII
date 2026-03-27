@@ -19,10 +19,6 @@ _github_cache: list = []
 _github_last_ok: bool = False
 
 
-def _weather_key() -> str:
-    return _vault.get("OPENWEATHER_API_KEY")
-
-
 def _github_headers() -> dict:
     try:
         token = _vault.get("GITHUB_TOKEN")
@@ -31,25 +27,41 @@ def _github_headers() -> dict:
         return {"Accept": "application/vnd.github+json"}
 
 
+_WEATHER_CODE_MAP = {
+    0: "Clear Sky", 1: "Mainly Clear", 2: "Partly Cloudy",
+    3: "Overcast", 45: "Foggy", 48: "Foggy",
+    51: "Light Drizzle", 53: "Drizzle", 55: "Heavy Drizzle",
+    61: "Light Rain", 63: "Rain", 65: "Heavy Rain",
+    71: "Light Snow", 73: "Snow", 75: "Heavy Snow",
+    80: "Rain Showers", 81: "Rain Showers", 82: "Heavy Showers",
+    95: "Thunderstorm", 96: "Thunderstorm", 99: "Thunderstorm",
+}
+
+
 @weather_router.get("/weather")
 async def get_weather():
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
-                "https://api.openweathermap.org/data/2.5/weather",
-                params={"lat": LAT, "lon": LON, "appid": _weather_key(), "units": "metric"}
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": LAT,
+                    "longitude": LON,
+                    "current": "temperature_2m,weathercode,relative_humidity_2m,windspeed_10m",
+                    "timezone": "Africa/Cairo",
+                }
             )
             resp.raise_for_status()
-            d = resp.json()
+            data = resp.json()
+        current = data["current"]
+        code = current["weathercode"]
         return {
-            "temp":       round(d["main"]["temp"]),
-            "feels_like": round(d["main"]["feels_like"]),
-            "humidity":   d["main"]["humidity"],
-            "condition":  d["weather"][0]["description"].title(),
-            "icon":       d["weather"][0]["icon"],
-            "wind":       round(d["wind"]["speed"] * 3.6),
-            "city":       CITY,
-            "error":      None,
+            "temp":      round(current["temperature_2m"]),
+            "condition": _WEATHER_CODE_MAP.get(code, "Unknown"),
+            "humidity":  current.get("relative_humidity_2m"),
+            "windspeed": current.get("windspeed_10m"),
+            "city":      CITY,
+            "error":     None,
         }
     except Exception as e:
         return {"error": str(e), "temp": None, "condition": None}
@@ -97,21 +109,28 @@ async def get_forecast():
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
-                "https://api.openweathermap.org/data/2.5/forecast",
-                params={"lat": LAT, "lon": LON, "appid": _weather_key(), "units": "metric", "cnt": 5}
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": LAT,
+                    "longitude": LON,
+                    "daily": "weathercode,temperature_2m_max,temperature_2m_min",
+                    "timezone": "Africa/Cairo",
+                    "forecast_days": 5,
+                }
             )
             resp.raise_for_status()
             data = resp.json()
+        daily = data["daily"]
         days = []
-        for item in data["list"]:
-            dt = datetime.datetime.fromtimestamp(item["dt"])
+        for i in range(len(daily["time"])):
+            dt = datetime.date.fromisoformat(daily["time"][i])
+            code = daily["weathercode"][i]
             days.append({
-                "day":      dt.strftime("%a"),
-                "date":     dt.strftime("%d %b"),
-                "temp_max": round(item["main"]["temp_max"]),
-                "temp_min": round(item["main"]["temp_min"]),
-                "condition":item["weather"][0]["description"].title(),
-                "icon":     item["weather"][0]["icon"],
+                "day":       dt.strftime("%a"),
+                "date":      dt.strftime("%d %b"),
+                "temp_max":  round(daily["temperature_2m_max"][i]),
+                "temp_min":  round(daily["temperature_2m_min"][i]),
+                "condition": _WEATHER_CODE_MAP.get(code, "Unknown"),
             })
         return {"forecast": days, "error": None}
     except Exception as e:

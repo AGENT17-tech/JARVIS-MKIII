@@ -1,0 +1,17 @@
+{
+  "name": "JARVIS-MKIII",
+  "short_name": "JARVIS",
+  "description": "PHANTOM ZERO AI Assistant — MKIII",
+  "start_url": "/mobile",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0f",
+  "theme_color": "#00d4ff",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%230a0a0f'/%3E%3Ccircle cx='96' cy='96' r='60' fill='none' stroke='%2300d4ff' stroke-width='4'/%3E%3Ccircle cx='96' cy='96' r='20' fill='%2300d4ff'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

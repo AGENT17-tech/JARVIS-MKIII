@@ -176,6 +176,15 @@ _ORGANIZE_PATS = [
     r'\bdelete\s+duplicate\b',
 ]
 
+# ── Morning Briefing ──────────────────────────────────────────────────────────
+_BRIEFING_PATS = [
+    r'\bmorning\s+briefing\b',
+    r'\bgive\s+(me\s+)?(the\s+)?briefing\b',
+    r'\bwhat.s\s+(the\s+)?briefing\b',
+    r'\bwhat\s+is\s+(the\s+)?briefing\b',
+    r'\bdaily\s+briefing\b',
+]
+
 # ── Mission Board ─────────────────────────────────────────────────────────────
 _MISSION_PATS = [
     r'\badd\s+(a\s+)?(mission|task)\b',
@@ -187,7 +196,6 @@ _MISSION_PATS = [
     r'\bmission\s+status\b',
     r'\bend\s+of\s+day\b',
     r'\bdefer\s+(task|mission)\b',
-    r'\bdaily\s+briefing\b',
     r'\bmission\s+board\b',
     r'\bcomplete\s+(mission|task)\b',
     r'\btask\s+list\b',
@@ -232,7 +240,7 @@ _GITHUB_PATS = [
     r'\bgithub\s+status\b',
 ]
 
-# ── Web fetch ──────────────────────────────────────────────────────────────────
+# ── Web fetch / scrape ─────────────────────────────────────────────────────────
 _FETCH_PATS = [
     r'\bfetch\s+(the\s+)?(page|content|url|site)\b',
     r'\bget\s+(the\s+)?(content\s+of|text\s+from)\s+https?://',
@@ -240,6 +248,9 @@ _FETCH_PATS = [
     r'\bread\s+(the\s+)?(page|content)\s+at\s+https?://',
     r'\bwhat.s\s+(on|at)\s+https?://',
     r'\bopen\s+and\s+read\s+https?://',
+    r'\bget\s+(data|info|information)\s+(from|at|on)\s+\S',
+    r'\bread\s+(the\s+)?page\s+\S',
+    r'\bscrape\b',
 ]
 
 # ── Diagnostics ────────────────────────────────────────────────────────────────
@@ -254,6 +265,20 @@ _DIAGNOSTIC_PATS = [
     r'\brun\s+a\s+check\b',
     r'\bhealth\s+report\b',
     r'\bdiagnostic\s+report\b',
+]
+
+# ── WhatsApp ──────────────────────────────────────────────────────────────────
+_WHATSAPP_PATS = [
+    r'\bmessage\s+\w[\w\s]+\b',            # "message John hey"
+    r'\bsend\s+(whatsapp\s+to|a\s+message\s+to|to)\s+\w',
+    r'\bwhatsapp\s+(message|messages|msg)\b',
+    r'\bwhat\s+are\s+my\s+(whatsapp\s+)?messages\b',
+    r'\bany\s+(whatsapp\s+)?messages\b',
+    r'\bread\s+my\s+(whatsapp\s+)?messages\b',
+    r'\bcheck\s+(my\s+)?whatsapp\b',
+    r'\bunread\s+messages\b',
+    r'\bwhatsapp\b.*\bsend\b',
+    r'\bsend\s+whatsapp\b',
 ]
 
 # ── Google Calendar ───────────────────────────────────────────────────────────
@@ -344,6 +369,82 @@ _AUTOGUI_PATS = [
     r'\btype\s+and\s+(press|hit)\b',
 ]
 
+# ── Proactive agent controls ──────────────────────────────────────────────────
+_PROACTIVE_SILENCE_PATS = [
+    r'\bsilence\s+(notifications?|alerts?)\b',
+    r'\b(do\s+not\s+disturb|dnd)\b',
+    r'\b(quiet|focus)\s+mode\b',
+    r'\bstop\s+(notifications?|interruptions?|alerts?)\b',
+    r'\bmute\s+(notifications?|alerts?)\b',
+    r'\bdon.t\s+(interrupt|disturb)\s+me\b',
+]
+
+_PROACTIVE_RESUME_PATS = [
+    r'\bresume\s+(notifications?|alerts?)\b',
+    r'\bend\s+(focus|quiet|dnd)\s+mode\b',
+    r'\bnotifications?\s+on\b',
+    r'\bunsilence\b',
+    r'\bi.m\s+(back|here)\b',
+]
+
+_PROACTIVE_CATCHUP_PATS = [
+    r'\bwhat\s+(have\s+i|did\s+i)\s+miss(ed)?\b',
+    r'\bany\s+(alerts?|notifications?|updates?)\b',
+    r'\banything\s+urgent\b',
+    r'\bcatch\s+me\s+up\b',
+    r'\brecent\s+alerts?\b',
+    r'\bshow\s+(me\s+)?(my\s+)?alerts?\b',
+]
+
+_PROACTIVE_SCAN_PATS = [
+    r'\bscan\s+now\b',
+    r'\brun\s+(a\s+)?(full\s+)?scan\b',
+    r'\bcheck\s+(all\s+systems?|everything)\b',
+    r'\bstatus\s+report\b',
+    r'\brun\s+diagnostics?\b',
+]
+
+_TUNNEL_URL_PATS = [
+    r'\bwhat\s+is\s+(my\s+)?(public|tunnel|cloudflare)\s+url\b',
+    r'\bwhat.s\s+(my\s+)?(public|tunnel|cloudflare)\s+url\b',
+    r'\b(give|tell)\s+me\s+(my\s+)?(public|tunnel)\s+url\b',
+    r'\btunnel\s+url\b',
+    r'\bpublic\s+url\b',
+    r'\bmobile\s+url\b',
+    r'\bhow\s+do\s+i\s+access\s+(you|jarvis)\s+(remotely|from\s+(my\s+)?phone)\b',
+    r'\bremote\s+access\s+url\b',
+]
+
+# ── RAG memory voice commands ─────────────────────────────────────────────────
+_RAG_RECALL_PATS = [
+    r'\bwhat\s+did\s+we\s+(work\s+on|discuss|talk\s+about)\b',
+    r'\bwhat\s+did\s+we\s+do\b',
+    r'\bremind\s+me\s+what\s+we\s+did\b',
+    r'\bdo\s+you\s+remember\b',
+    r'\bwhat\s+do\s+you\s+(know|remember)\s+(about|regarding)\b',
+    r'\brecall\b',
+    r'\bfrom\s+(memory|long.term)\b',
+    r'\bsearch\s+(your\s+)?(memory|memories)\b',
+    r'\bwhat\s+have\s+we\s+(talked|spoken|discussed)\s+(about|before)\b',
+]
+
+_RAG_STORE_PATS = [
+    r'\bremember\s+that\b',
+    r'\bstore\s+(this|that)\s+fact\b',
+    r'\bmake\s+a\s+note\b',
+    r'\bsave\s+(this|that)\s+to\s+(memory|long.term)\b',
+    r'\badd\s+(this\s+)?to\s+(your\s+)?memory\b',
+    r'\bkeep\s+(this|that)\s+in\s+mind\b',
+    r'\bdon.t\s+forget\s+that\b',
+]
+
+_RAG_CLEAR_PATS = [
+    r'\bforget\s+everything\b',
+    r'\bclear\s+(all\s+)?(memory|memories)\b',
+    r'\berase\s+(all\s+)?(memory|memories)\b',
+    r'\bwipe\s+(your\s+)?(memory|memories)\b',
+]
+
 # ── Screen vision ─────────────────────────────────────────────────────────────
 _VISION_PATS = [
     r'\bwhat\s+do\s+you\s+see\b',
@@ -358,6 +459,14 @@ _VISION_PATS = [
     r'\bwhat\s+(app|application|window)\s+is\s+open\b',
     r'\bwatch\s+(the\s+)?screen\b',
     r'\bmonitor\s+(the\s+)?screen\b',
+    # Extended LLaVA voice triggers
+    r'\bwhat\s+(can\s+you\s+|do\s+you\s+)?(see|observe|notice)\b',
+    r'\b(look\s+at|analyze|describe)\s+(my\s+|the\s+)?screen\b',
+    r'\btake\s+a\s+look\b',
+    r"\bwhat.s\s+(this|that|here|there)\b",
+    r'\bread\s+(this|that|what.s\s+on\s+(the\s+)?screen)\b',
+    r'\b(scan|check|inspect)\s+(the\s+|my\s+)?(screen|image|picture|photo)\b',
+    r'\bjarvis\s+(look|see|watch|observe)\b',
 ]
 
 
@@ -423,8 +532,18 @@ def _os_intent_match(text: str) -> tuple[str | None, str | None]:
     # Vision and autogui checked first — their patterns are specific and
     # would otherwise be swallowed by broader file/browser patterns
     # (e.g. "move the mouse to..." matches the file "move...to" pattern).
-    if _pat_match(_DIAGNOSTIC_PATS,  text): return "diagnostic",  text
+    if _pat_match(_RAG_CLEAR_PATS,          text): return "rag_clear",          text
+    if _pat_match(_RAG_STORE_PATS,          text): return "rag_store",          text
+    if _pat_match(_RAG_RECALL_PATS,         text): return "rag_recall",         text
+    if _pat_match(_DIAGNOSTIC_PATS,         text): return "diagnostic",        text
+    if _pat_match(_PROACTIVE_SILENCE_PATS,  text): return "proactive_silence",  text
+    if _pat_match(_PROACTIVE_RESUME_PATS,   text): return "proactive_resume",   text
+    if _pat_match(_PROACTIVE_CATCHUP_PATS,  text): return "proactive_catchup",  text
+    if _pat_match(_PROACTIVE_SCAN_PATS,     text): return "proactive_scan",     text
+    if _pat_match(_TUNNEL_URL_PATS,         text): return "tunnel_url",          text
+    if _pat_match(_BRIEFING_PATS,   text): return "briefing",     text
     if _pat_match(_MISSION_PATS,    text): return "mission",      text
+    if _pat_match(_WHATSAPP_PATS,   text): return "whatsapp",     text
     if _pat_match(_CALENDAR_PATS,   text): return "calendar",     text
     if _pat_match(_TIME_PATS,       text): return "time_date",    text
     if _pat_match(_SCREENSHOT_PATS, text): return "screenshot",   text
@@ -516,10 +635,15 @@ async def parse_intent(text: str) -> tuple[str | None, str | None]:
       "vision"             — vision agent       (payload = original text)
       "autogui"            — autogui agent      (payload = original text)
       "mission"            — mission board      (payload = original text)
+      "briefing"           — morning briefing   (payload = original text)
       "diagnostic"         — system diagnostic  (payload = original text)
       "mcp_brave"          — Brave web search  (payload = original text)
       "mcp_github"         — GitHub query      (payload = original text)
       "mcp_fetch"          — web fetch         (payload = original text)
+      "whatsapp"           — WhatsApp send/read (payload = original text)
+      "rag_recall"         — RAG memory recall  (payload = original text)
+      "rag_store"          — RAG store fact     (payload = original text)
+      "rag_clear"          — RAG clear memory   (payload = original text)
     Returns (None, None) if no system-control intent detected.
     """
     _lower = text.lower()

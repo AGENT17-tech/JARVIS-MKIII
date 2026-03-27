@@ -1,27 +1,17 @@
 [Unit]
-Description=JARVIS-MKIII Voice Pipeline
+Description=JARVIS Voice Pipeline (STT + TTS + Orchestrator)
 After=network.target jarvis-mkiii.service
 Wants=jarvis-mkiii.service
-StartLimitIntervalSec=120
-StartLimitBurst=5
 
 [Service]
 Type=simple
-User=kiko
-WorkingDirectory=/home/kiko/JARVIS_MKIII/backend
-ExecStart=/home/kiko/JARVIS_MKIII/venv/bin/python3 voice/voice_orchestrator.py
+WorkingDirectory=/home/k/JARVIS-MKIII/backend
+ExecStartPre=/bin/sleep 5
+ExecStart=/home/k/JARVIS-MKIII/venv/bin/python3 voice/voice_orchestrator.py
 Restart=on-failure
-RestartSec=10
-Environment=PYTHONPATH=/home/kiko/JARVIS_MKIII/backend
-# Set your vault master password here so the service can unlock secrets without
-# an interactive prompt. Example: JARVIS_VAULT_PASSWORD=your_master_password
-# Alternatively, write the password to ~/JARVIS_MKIII/.vault_pass (chmod 600)
-# and leave this blank — the vault will read it from that file automatically.
-Environment=JARVIS_VAULT_PASSWORD=
-Environment=XDG_RUNTIME_DIR=/run/user/1000
-Environment=PULSE_RUNTIME_PATH=/run/user/1000/pulse
-Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-TimeoutStopSec=30
+RestartSec=5
+KillMode=control-group
+Environment="PYTHONPATH=/home/k/JARVIS-MKIII/backend"
 
 [Install]
 WantedBy=default.target

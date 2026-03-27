@@ -9,7 +9,7 @@ Flow:
 """
 
 from __future__ import annotations
-import asyncio, threading, httpx, websockets, json, datetime, time, signal
+import asyncio, threading, httpx, websockets, json, datetime, time, signal, re
 from voice.stt import STTEngine
 from voice.news import get_morning_briefing
 from voice.tts import TTSEngine
@@ -51,7 +51,11 @@ class VoiceOrchestrator:
         self._tts.start()
 
         # Start HUD event loop
-        threading.Thread(target=self._run_loop, daemon=True).start()
+        loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+        loop_thread.start()
+        # Wait until event loop is actually running before scheduling coroutine
+        while not self._loop.is_running():
+            time.sleep(0.05)
         asyncio.run_coroutine_threadsafe(self._connect_hud(), self._loop)
 
         # Block until Kokoro confirms ready — no blind sleep
@@ -88,7 +92,10 @@ class VoiceOrchestrator:
         self._busy = True
         self._send_hud(f"voice:transcript:{text}")
         self._send_hud("voice:processing")
-        threading.Thread(target=self._query_mkiii, args=(text,), daemon=True).start()
+        threading.Thread(
+            target=lambda: asyncio.run(self._query_mkiii(text)),
+            daemon=True,
+        ).start()
 
     def _on_speaking_start(self) -> None:
         self._is_speaking = True
@@ -106,25 +113,43 @@ class VoiceOrchestrator:
 
     # ── MKIII query ───────────────────────────────────────────────────────────
 
-    def _query_mkiii(self, prompt: str) -> None:
-        try:
-            resp = httpx.post(
-                f"{API_BASE}/chat",
-                json={"prompt": prompt, "session_id": SESSION_ID},
-                timeout=120.0,
-            )
-            data = resp.json()
-            text = data.get("response", "")
-            tier = data.get("tier", "voice")
-            if text:
-                self._send_hud(f"voice:response:{text}")
-                print(f"[VOICE] [{tier.upper()}] {text}")
-                self._tts.speak(text)
-            else:
-                self._busy = False
-        except Exception as e:
-            print(f"[VOICE] Query failed: {e}")
-            self._busy = False
+    async def _query_mkiii(self, prompt: str) -> None:
+        MAX_RETRIES = 3
+        for attempt in range(MAX_RETRIES):
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    r = await client.post(
+                        f"{API_BASE}/chat",
+                        json={"prompt": prompt, "session_id": SESSION_ID},
+                    )
+                    if r.status_code != 200:
+                        print(f"[VOICE] Chat returned {r.status_code} (attempt {attempt+1})")
+                        await asyncio.sleep(2)
+                        continue
+                    if not r.text.strip():
+                        print(f"[VOICE] Empty response (attempt {attempt+1})")
+                        await asyncio.sleep(2)
+                        continue
+                    data = r.json()
+                    text = data.get("response", "")
+                    tier = data.get("tier", "voice")
+                    if text:
+                        self._send_hud(f"voice:response:{text}")
+                        print(f"[VOICE] [{tier.upper()}] {text}")
+                        try:
+                            from core.text_sanitizer import sanitize_for_tts
+                            text = sanitize_for_tts(text)
+                        except Exception:
+                            pass
+                        self._tts.speak(text)
+                    else:
+                        self._busy = False
+                    return
+            except Exception as e:
+                print(f"[VOICE] Query failed (attempt {attempt+1}): {e}")
+                await asyncio.sleep(2)
+        print("[VOICE] All retries exhausted — skipping response")
+        self._busy = False
 
     # ── HUD WebSocket ─────────────────────────────────────────────────────────
 
@@ -174,33 +199,25 @@ class VoiceOrchestrator:
     # ── Boot greeting ─────────────────────────────────────────────────────────
 
     def _speak_greeting(self) -> None:
-        greeting_word = _time_greeting()
-        try:
-            resp = httpx.post(
-                f"{API_BASE}/chat",
-                json={
-                    "prompt": f"Give a one-sentence Jarvis boot greeting to Khalid (address him as 'sir') starting with '{greeting_word}'. Be brief and British.",
-                    "session_id": SESSION_ID,
-                },
-                timeout=30.0,
-            )
-            greeting = resp.json().get("response", f"{greeting_word}, sir. All systems online.")
-        except Exception:
-            greeting = f"{greeting_word}, sir. All systems online."
-
+        # Brief system-ready announcement only.
+        # The full briefing (weather + calendar + missions + news) is delivered
+        # separately via the morning_briefing pipeline — speaking it here would
+        # cause a duplicate since run_briefing() queues it via request_speak().
+        greeting = "All systems online."
         self._send_hud(f"voice:response:{greeting}")
         self._tts.speak(greeting)
 
-        # Morning news briefing
+        # If the briefing cache is already populated (backend ran before voice
+        # service started) and the voice bridge was not yet connected when
+        # run_briefing() executed, speak it now so it is not lost.
         try:
-            future = asyncio.run_coroutine_threadsafe(get_morning_briefing(), self._loop)
-            briefing = future.result(timeout=30)
-            intro = "Here is your morning briefing, sir."
-            self._send_hud(f"voice:response:{intro} {briefing}")
-            self._tts.speak(intro)
-            self._tts.speak(briefing)
+            from briefing.morning_briefing import get_today_spoken_briefing
+            spoken = get_today_spoken_briefing()
+            if spoken:
+                self._send_hud(f"voice:response:{spoken}")
+                self._tts.speak(spoken)
         except Exception as e:
-            print(f"[NEWS] Briefing failed: {e}")
+            print(f"[NEWS] Briefing cache read failed: {e}")
 
 
 if __name__ == "__main__":

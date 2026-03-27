@@ -29,16 +29,7 @@ export default function AutonomousAlerts() {
     }, 4000)
   }
 
-  // Periodic simulated alerts
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (Math.random() > 0.55) {
-        const a = ALERT_POOL[Math.floor(Math.random() * ALERT_POOL.length)]
-        pushAlert(a.msg, a.color, a.icon)
-      }
-    }, 7000)
-    return () => clearInterval(id)
-  }, [])
+  // Simulated alerts removed — real events come from backend WebSocket
 
   // Poll MKIII status and alert on state change
   useEffect(() => {
@@ -66,7 +57,7 @@ export default function AutonomousAlerts() {
             lastStatus = 'offline'
           }
         })
-    }, 15000)
+    }, 30000)
     return () => clearInterval(id)
   }, [])
 

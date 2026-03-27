@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#00d4ff">
+<title>JARVIS · MKIII</title>
+<link rel="manifest" href="/mobile/manifest.json">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #060810;
+    --surface:  #0a0e1a;
+    --border:   rgba(0,212,255,0.18);
+    --accent:   #00d4ff;
+    --accent2:  #00ffc8;
+    --warn:     #ff8800;
+    --danger:   #ff3344;
+    --text:     rgba(160,215,255,0.9);
+    --dim:      rgba(0,140,200,0.55);
+    --font-ui:  'Courier New', monospace;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bot: env(safe-area-inset-bottom, 0px);
+  }
+
+  html, body {
+    height: 100%; width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ── LAYOUT ─────────────────────────────────────────── */
+  #app {
+    display: flex; flex-direction: column;
+    height: 100dvh;
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bot);
+  }
+
+  /* ── HEADER ─────────────────────────────────────────── */
+  #header {
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(6,8,16,0.95);
+    backdrop-filter: blur(12px);
+  }
+  #header h1 {
+    font-size: 14px; font-weight: 700; letter-spacing: 4px;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  #header h1 span { color: rgba(0,212,255,0.45); font-size: 10px; }
+  #conn-badge {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 9px; letter-spacing: 1.5px; color: var(--dim);
+    padding: 4px 10px;
+    border: 1px solid var(--border); border-radius: 12px;
+    background: rgba(0,20,40,0.6);
+  }
+  #conn-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #ff3344; box-shadow: 0 0 6px #ff3344;
+    transition: all 0.3s;
+  }
+  #conn-dot.online { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); animation: pulse 2s infinite; }
+
+  /* ── STATUS STRIP ───────────────────────────────────── */
+  #status-strip {
+    flex-shrink: 0;
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px; padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px 10px; text-align: center;
+    cursor: pointer; transition: border-color 0.2s;
+    min-height: 52px; display: flex; flex-direction: column; justify-content: center;
+  }
+  .stat-card:active { border-color: var(--accent); }
+  .stat-label { font-size: 7px; letter-spacing: 2px; color: var(--dim); text-transform: uppercase; margin-bottom: 3px; }
+  .stat-value { font-size: 12px; color: var(--accent); font-weight: 700; }
+  .stat-sub   { font-size: 8px; color: var(--dim); margin-top: 2px; }
+
+  /* ── CHAT FEED ──────────────────────────────────────── */
+  #chat-feed {
+    flex: 1; overflow-y: auto; overflow-x: hidden;
+    padding: 10px; display: flex; flex-direction: column; gap: 8px;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+  .msg {
+    max-width: 88%; display: flex; flex-direction: column; gap: 3px;
+    animation: fadeUp 0.2s ease-out;
+  }
+  .msg.user  { align-self: flex-end; align-items: flex-end; }
+  .msg.jarvis{ align-self: flex-start; align-items: flex-start; }
+  .msg-bubble {
+    padding: 10px 14px; border-radius: 4px; font-size: 13px; line-height: 1.5;
+  }
+  .msg.user   .msg-bubble { background: rgba(0,170,255,0.15); border: 1px solid rgba(0,170,255,0.35); color: rgba(180,230,255,0.95); }
+  .msg.jarvis .msg-bubble { background: rgba(0,20,50,0.7);    border: 1px solid var(--border);         color: var(--text); }
+  .msg.system .msg-bubble { background: rgba(0,80,20,0.3);    border: 1px solid rgba(0,200,100,0.3);   color: rgba(0,220,140,0.9); font-size: 11px; align-self: center; }
+  .msg-time   { font-size: 8px; color: var(--dim); padding: 0 4px; }
+  .msg-source { font-size: 8px; color: var(--dim); letter-spacing: 1.5px; padding: 0 4px; }
+
+  /* Typing indicator */
+  #typing {
+    display: none; align-self: flex-start; padding: 6px 14px;
+    background: rgba(0,20,50,0.7); border: 1px solid var(--border);
+    border-radius: 4px; gap: 5px; align-items: center;
+  }
+  #typing.show { display: flex; }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--dim); animation: blink 1.2s infinite; }
+  .dot:nth-child(2) { animation-delay: 0.2s; }
+  .dot:nth-child(3) { animation-delay: 0.4s; }
+
+  /* ── QUICK ACTIONS ──────────────────────────────────── */
+  #actions-bar {
+    flex-shrink: 0;
+    display: flex; gap: 6px; padding: 6px 10px;
+    border-top: 1px solid var(--border);
+    overflow-x: auto; scrollbar-width: none;
+  }
+  #actions-bar::-webkit-scrollbar { display: none; }
+  .action-btn {
+    flex-shrink: 0;
+    width: 44px; height: 44px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    cursor: pointer; transition: all 0.15s; gap: 2px;
+    -webkit-user-select: none; user-select: none;
+  }
+  .action-btn:active { background: rgba(0,100,200,0.25); border-color: var(--accent); transform: scale(0.94); }
+  .action-btn .icon { font-size: 18px; line-height: 1; }
+  .action-btn .lbl  { font-size: 7px; color: var(--dim); letter-spacing: 0.5px; }
+
+  /* ── INPUT ROW ──────────────────────────────────────── */
+  #input-row {
+    flex-shrink: 0;
+    display: flex; gap: 8px; padding: 8px 10px;
+    background: rgba(6,8,16,0.98);
+    border-top: 1px solid var(--border);
+  }
+  #msg-input {
+    flex: 1; padding: 12px 14px;
+    background: rgba(0,12,30,0.8); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); font-family: var(--font-ui); font-size: 14px;
+    outline: none; resize: none; min-height: 44px; max-height: 100px;
+    line-height: 1.4; transition: border-color 0.2s;
+    -webkit-appearance: none;
+  }
+  #msg-input:focus   { border-color: rgba(0,180,255,0.5); }
+  #msg-input::placeholder { color: var(--dim); }
+  #send-btn {
+    padding: 0 20px; height: 44px;
+    background: rgba(0,150,220,0.2); border: 1px solid rgba(0,170,255,0.45);
+    border-radius: 4px; color: var(--accent);
+    font-family: var(--font-ui); font-size: 11px; font-weight: 700; letter-spacing: 2px;
+    cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0;
+    -webkit-appearance: none;
+  }
+  #send-btn:active   { background: rgba(0,170,255,0.3); transform: scale(0.96); }
+  #send-btn:disabled { opacity: 0.4; pointer-events: none; }
+
+  /* ── TOKEN GATE ─────────────────────────────────────── */
+  #token-gate {
+    display: none; position: fixed; inset: 0; z-index: 999;
+    background: var(--bg); flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px; padding: 32px;
+  }
+  #token-gate.show { display: flex; }
+  .gate-logo { font-size: 28px; font-weight: 700; letter-spacing: 8px; color: var(--accent); text-align: center; }
+  .gate-sub  { font-size: 11px; color: var(--dim); letter-spacing: 2px; text-align: center; }
+  .gate-input {
+    width: 100%; max-width: 320px; padding: 14px 16px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); font-family: var(--font-ui); font-size: 15px;
+    outline: none; text-align: center; letter-spacing: 3px;
+    -webkit-appearance: none;
+  }
+  .gate-btn {
+    width: 100%; max-width: 320px; padding: 14px;
+    background: rgba(0,150,220,0.2); border: 1px solid rgba(0,170,255,0.45);
+    border-radius: 4px; color: var(--accent);
+    font-family: var(--font-ui); font-size: 12px; font-weight: 700; letter-spacing: 3px;
+    cursor: pointer;
+  }
+  .gate-err { color: var(--danger); font-size: 11px; letter-spacing: 1px; min-height: 16px; }
+
+  /* ── MODAL OVERLAY ──────────────────────────────────── */
+  #modal {
+    display: none; position: fixed; inset: 0; z-index: 500;
+    background: rgba(0,0,0,0.85); align-items: flex-end; justify-content: center;
+    padding-bottom: var(--safe-bot);
+  }
+  #modal.show { display: flex; }
+  #modal-inner {
+    width: 100%; max-height: 70dvh; overflow-y: auto;
+    background: var(--surface); border-top: 1px solid var(--border); border-radius: 8px 8px 0 0;
+    padding: 16px; animation: slideUp 0.25s ease-out;
+  }
+  .modal-title { font-size: 10px; letter-spacing: 3px; color: var(--accent); margin-bottom: 12px; }
+  .modal-close {
+    float: right; background: none; border: none;
+    color: var(--dim); font-size: 20px; cursor: pointer; line-height: 1; margin-top: -4px;
+  }
+  .modal-item {
+    padding: 10px 0; border-bottom: 1px solid rgba(0,212,255,0.07);
+    font-size: 12px; color: var(--text); line-height: 1.5;
+  }
+  .modal-item:last-child { border-bottom: none; }
+  .modal-badge {
+    display: inline-block; font-size: 8px; letter-spacing: 1.5px; padding: 2px 7px;
+    border-radius: 2px; margin-bottom: 4px; font-weight: 700;
+  }
+  .badge-high   { background: rgba(255,136,0,0.2); border: 1px solid rgba(255,136,0,0.4); color: rgba(255,160,60,0.9); }
+  .badge-medium { background: rgba(0,180,255,0.1); border: 1px solid rgba(0,180,255,0.3); color: rgba(0,200,255,0.8); }
+  .badge-low    { background: rgba(0,255,200,0.1); border: 1px solid rgba(0,255,200,0.3); color: rgba(0,220,180,0.8); }
+
+  /* ── ANIMATIONS ─────────────────────────────────────── */
+  @keyframes fadeUp   { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  @keyframes slideUp  { from { transform:translateY(100%); } to { transform:none; } }
+  @keyframes blink    { 0%,100%{opacity:.3} 50%{opacity:1} }
+  @keyframes pulse    { 0%,100%{opacity:1} 50%{opacity:.6} }
+  @keyframes spin     { to { transform: rotate(360deg); } }
+
+  /* ── SPINNER ─────────────────────────────────────────── */
+  .spinner { width:18px; height:18px; border:2px solid rgba(0,212,255,0.2); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; }
+
+  /* ── SCROLLBAR ───────────────────────────────────────── */
+  #chat-feed::-webkit-scrollbar { width:3px; }
+  #chat-feed::-webkit-scrollbar-track { background:transparent; }
+  #chat-feed::-webkit-scrollbar-thumb { background:rgba(0,180,255,0.2); border-radius:2px; }
+</style>
+</head>
+<body>
+
+<!-- TOKEN GATE -->
+<div id="token-gate">
+  <div class="gate-logo">JARVIS · MKIII</div>
+  <div class="gate-sub">PHANTOM ZERO SECURE ACCESS</div>
+  <input class="gate-input" id="token-input" type="password" placeholder="ACCESS TOKEN" autocomplete="off" autocorrect="off" spellcheck="false">
+  <div class="gate-err" id="gate-err"></div>
+  <button class="gate-btn" id="gate-submit">AUTHENTICATE</button>
+</div>
+
+<div id="app">
+  <!-- HEADER -->
+  <div id="header">
+    <h1>JARVIS <span>· MKIII</span></h1>
+    <div id="conn-badge">
+      <div id="conn-dot"></div>
+      <span id="conn-label">OFFLINE</span>
+    </div>
+  </div>
+
+  <!-- STATUS STRIP -->
+  <div id="status-strip">
+    <div class="stat-card" onclick="showWeather()">
+      <div class="stat-label">WEATHER</div>
+      <div class="stat-value" id="stat-weather">--°C</div>
+      <div class="stat-sub"  id="stat-cond">Cairo</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">TIME</div>
+      <div class="stat-value" id="stat-time">--:--</div>
+      <div class="stat-sub"  id="stat-date">--</div>
+    </div>
+    <div class="stat-card" onclick="showMissions()">
+      <div class="stat-label">MISSIONS</div>
+      <div class="stat-value" id="stat-missions">--</div>
+      <div class="stat-sub">active</div>
+    </div>
+  </div>
+
+  <!-- CHAT FEED -->
+  <div id="chat-feed">
+    <div id="typing" class="msg jarvis">
+      <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    </div>
+  </div>
+
+  <!-- QUICK ACTIONS -->
+  <div id="actions-bar">
+    <div class="action-btn" onclick="doVision()" title="Screenshot Analysis">
+      <span class="icon">📷</span><span class="lbl">VISION</span>
+    </div>
+    <div class="action-btn" onclick="doBriefing()" title="Morning Briefing">
+      <span class="icon">⚡</span><span class="lbl">BRIEF</span>
+    </div>
+    <div class="action-btn" onclick="doAlerts()" title="Recent Alerts">
+      <span class="icon">🔔</span><span class="lbl">ALERTS</span>
+    </div>
+    <div class="action-btn" onclick="showMissions()" title="Missions">
+      <span class="icon">📋</span><span class="lbl">MISSIONS</span>
+    </div>
+    <div class="action-btn" onclick="showWeather()" title="Weather">
+      <span class="icon">🌤</span><span class="lbl">WEATHER</span>
+    </div>
+    <div class="action-btn" onclick="doScan()" title="Proactive Scan">
+      <span class="icon">🔍</span><span class="lbl">SCAN</span>
+    </div>
+  </div>
+
+  <!-- INPUT ROW -->
+  <div id="input-row">
+    <textarea id="msg-input" placeholder="Message JARVIS..." rows="1"></textarea>
+    <button id="send-btn">SEND</button>
+  </div>
+</div>
+
+<!-- MODAL OVERLAY -->
+<div id="modal" onclick="closeModal(event)">
+  <div id="modal-inner">
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <div class="modal-title" id="modal-title">INFO</div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ── Config ───────────────────────────────────────────────────────────────────
+const BASE      = window.location.origin;
+const SESSION   = 'mobile-' + Math.random().toString(36).slice(2,8);
+const TOKEN_KEY = 'jarvis_token';
+let   TOKEN     = '';
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+function savedToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+function saveToken(t) { localStorage.setItem(TOKEN_KEY, t); TOKEN = t; }
+function clearToken() { localStorage.removeItem(TOKEN_KEY); TOKEN = ''; }
+
+function headers(extra = {}) {
+  return { 'Content-Type': 'application/json', 'X-JARVIS-Token': TOKEN, ...extra };
+}
+
+// ── Fetch helper ─────────────────────────────────────────────────────────────
+async function api(path, opts = {}) {
+  const res = await fetch(BASE + path, {
+    headers: headers(),
+    ...opts,
+    headers: { ...headers(), ...(opts.headers || {}) },
+  });
+  if (res.status === 401) {
+    clearToken();
+    showGate();
+    throw new Error('Unauthorized');
+  }
+  return res;
+}
+
+// ── Token Gate ───────────────────────────────────────────────────────────────
+const gate       = document.getElementById('token-gate');
+const gateInput  = document.getElementById('token-input');
+const gateErr    = document.getElementById('gate-err');
+const gateSubmit = document.getElementById('gate-submit');
+
+function showGate() {
+  gate.classList.add('show');
+  gateInput.focus();
+}
+function hideGate() { gate.classList.remove('show'); }
+
+async function authenticate() {
+  const t = gateInput.value.trim();
+  if (!t) { gateErr.textContent = 'Token required.'; return; }
+  gateErr.textContent = '';
+  gateSubmit.textContent = 'VERIFYING...';
+  try {
+    const res = await fetch(BASE + '/health', {
+      headers: { 'X-JARVIS-Token': t }
+    });
+    if (res.ok) {
+      saveToken(t);
+      hideGate();
+      init();
+    } else {
+      gateErr.textContent = 'Invalid token.';
+      gateSubmit.textContent = 'AUTHENTICATE';
+    }
+  } catch {
+    gateErr.textContent = 'Cannot reach JARVIS.';
+    gateSubmit.textContent = 'AUTHENTICATE';
+  }
+}
+
+gateSubmit.addEventListener('click', authenticate);
+gateInput.addEventListener('keydown', e => { if (e.key === 'Enter') authenticate(); });
+
+// ── Connection ────────────────────────────────────────────────────────────────
+const connDot   = document.getElementById('conn-dot');
+const connLabel = document.getElementById('conn-label');
+
+function setOnline(on) {
+  connDot.className   = on ? 'online' : '';
+  connLabel.textContent = on ? 'ONLINE' : 'OFFLINE';
+}
+
+async function ping() {
+  try {
+    const r = await fetch(BASE + '/health', { headers: headers() });
+    setOnline(r.ok);
+  } catch { setOnline(false); }
+}
+
+// ── Status strip ─────────────────────────────────────────────────────────────
+async function refreshStatus() {
+  // Time (local, no API needed)
+  const now  = new Date();
+  document.getElementById('stat-time').textContent = now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  document.getElementById('stat-date').textContent = now.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric'});
+
+  // Weather
+  try {
+    const r = await api('/weather');
+    if (r.ok) {
+      const d = await r.json();
+      if (d.temp != null) {
+        document.getElementById('stat-weather').textContent = d.temp + '°C';
+        document.getElementById('stat-cond').textContent   = d.condition || 'Cairo';
+      }
+    }
+  } catch {}
+
+  // Missions
+  try {
+    const r = await api('/missions');
+    if (r.ok) {
+      const d = await r.json();
+      const active = Array.isArray(d) ? d.filter(m => m.status !== 'complete' && m.status !== 'deferred').length : '?';
+      document.getElementById('stat-missions').textContent = active;
+    }
+  } catch {}
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+const feed  = document.getElementById('chat-feed');
+const input = document.getElementById('msg-input');
+const sendBtn = document.getElementById('send-btn');
+const typing  = document.getElementById('typing');
+
+function ts() {
+  return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+
+function addMsg(role, text, source) {
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  bubble.textContent = text;
+  el.appendChild(bubble);
+  const meta = document.createElement('div');
+  meta.className = source ? 'msg-source' : 'msg-time';
+  meta.textContent = source ? source.toUpperCase() : ts();
+  el.appendChild(meta);
+  feed.insertBefore(el, typing);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function showTyping(on) {
+  typing.className = 'msg' + (on ? ' show' : '');
+  if (on) feed.scrollTop = feed.scrollHeight;
+}
+
+async function sendMessage(text) {
+  if (!text.trim()) return;
+  addMsg('user', text);
+  input.value = '';
+  input.style.height = 'auto';
+  sendBtn.disabled = true;
+  showTyping(true);
+  try {
+    const r = await api('/chat', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: text, session_id: SESSION }),
+    });
+    const d = await r.json();
+    showTyping(false);
+    addMsg('jarvis', d.response || '(no response)', d.tier);
+  } catch (e) {
+    showTyping(false);
+    addMsg('system', 'Connection error: ' + e.message);
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
+  }
+}
+
+sendBtn.addEventListener('click', () => sendMessage(input.value));
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage(input.value);
+  }
+});
+input.addEventListener('input', () => {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 100) + 'px';
+});
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+const modal      = document.getElementById('modal');
+const modalTitle = document.getElementById('modal-title');
+const modalBody  = document.getElementById('modal-body');
+
+function showModal(title, html) {
+  modalTitle.textContent = title;
+  modalBody.innerHTML    = html;
+  modal.classList.add('show');
+}
+function closeModal(e) {
+  if (!e || e.target === modal) modal.classList.remove('show');
+}
+
+// ── Quick Actions ──────────────────────────────────────────────────────────────
+async function doVision() {
+  showModal('VISION SCAN', '<div style="display:flex;justify-content:center;padding:20px"><div class="spinner"></div></div>');
+  try {
+    const r = await api('/vision/screenshot', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'Describe what is on this screen briefly.' }),
+    });
+    const d = await r.json();
+    const desc = d.description || d.error || 'No description.';
+    showModal('VISION SCAN', `<div class="modal-item">${desc}</div>`);
+    addMsg('jarvis', desc, 'vision');
+  } catch (e) {
+    showModal('VISION SCAN', `<div class="modal-item" style="color:var(--danger)">Error: ${e.message}</div>`);
+  }
+}
+
+async function doBriefing() {
+  showModal('BRIEFING', '<div style="display:flex;justify-content:center;padding:20px"><div class="spinner"></div></div>');
+  try {
+    const r = await api('/briefing/run');
+    const d = await r.json();
+    const text = d.spoken || 'Briefing unavailable.';
+    showModal('MORNING BRIEFING', `<div class="modal-item">${text}</div>`);
+    addMsg('jarvis', text, 'briefing');
+  } catch (e) {
+    showModal('BRIEFING', `<div class="modal-item" style="color:var(--danger)">Error: ${e.message}</div>`);
+  }
+}
+
+async function doAlerts() {
+  showModal('RECENT ALERTS', '<div style="display:flex;justify-content:center;padding:20px"><div class="spinner"></div></div>');
+  try {
+    const r = await api('/proactive/history');
+    const d = await r.json();
+    const alerts = (d.alerts || []).slice(0, 5);
+    if (!alerts.length) {
+      showModal('RECENT ALERTS', '<div class="modal-item">No alerts on record. All clear.</div>');
+      return;
+    }
+    const html = alerts.map(a => {
+      const tStr = a.timestamp ? new Date(a.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+      const cls  = `badge-${a.priority === 'critical' ? 'high' : (a.priority || 'low')}`;
+      return `<div class="modal-item">
+        <span class="modal-badge ${cls}">${(a.source || '').toUpperCase()}</span>
+        <span style="float:right;font-size:9px;color:var(--dim)">${tStr}</span>
+        <br>${a.message || ''}
+      </div>`;
+    }).join('');
+    showModal('RECENT ALERTS', html);
+  } catch (e) {
+    showModal('RECENT ALERTS', `<div class="modal-item" style="color:var(--danger)">Error: ${e.message}</div>`);
+  }
+}
+
+async function showMissions() {
+  showModal('MISSIONS', '<div style="display:flex;justify-content:center;padding:20px"><div class="spinner"></div></div>');
+  try {
+    const r = await api('/missions');
+    const d = await r.json();
+    const missions = Array.isArray(d) ? d : [];
+    if (!missions.length) {
+      showModal('MISSIONS', '<div class="modal-item">No missions logged today.</div>');
+      return;
+    }
+    const STATUS_ICON = { complete: '✓', in_progress: '⟳', pending: '○', deferred: '⏸' };
+    const html = missions.map(m => {
+      const icon  = STATUS_ICON[m.status] || '○';
+      const color = m.status === 'complete' ? 'var(--accent2)' : m.status === 'in_progress' ? 'var(--warn)' : 'var(--text)';
+      return `<div class="modal-item" style="color:${color}">
+        <span style="font-size:11px">${icon}</span> ${m.title || '(untitled)'}
+        <span style="float:right;font-size:9px;color:var(--dim)">${m.priority || ''}</span>
+      </div>`;
+    }).join('');
+    showModal('MISSIONS', html);
+  } catch (e) {
+    showModal('MISSIONS', `<div class="modal-item" style="color:var(--danger)">Error: ${e.message}</div>`);
+  }
+}
+
+async function showWeather() {
+  try {
+    const r = await api('/weather');
+    const d = await r.json();
+    if (d.error) { showModal('WEATHER', `<div class="modal-item" style="color:var(--danger)">${d.error}</div>`); return; }
+    const html = `
+      <div class="modal-item">
+        <div style="font-size:28px;font-weight:700;color:var(--accent);margin-bottom:6px">${d.temp}°C</div>
+        <div style="font-size:14px;margin-bottom:10px">${d.condition}</div>
+        <div style="color:var(--dim);font-size:10px">
+          Humidity: ${d.humidity}% &nbsp;·&nbsp; Wind: ${d.windspeed} km/h &nbsp;·&nbsp; ${d.city}
+        </div>
+      </div>`;
+    showModal('WEATHER — CAIRO', html);
+  } catch (e) {
+    showModal('WEATHER', `<div class="modal-item" style="color:var(--danger)">Error: ${e.message}</div>`);
+  }
+}
+
+async function doScan() {
+  try {
+    await api('/proactive/trigger', { method: 'POST', body: JSON.stringify({ source: 'all' }) });
+    addMsg('system', 'Proactive scan triggered. Monitoring all sources.');
+  } catch (e) {
+    addMsg('system', 'Scan failed: ' + e.message);
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+function init() {
+  ping();
+  refreshStatus();
+  setInterval(ping, 30000);
+  setInterval(refreshStatus, 30000);
+  setInterval(() => {
+    const now = new Date();
+    document.getElementById('stat-time').textContent = now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  }, 10000);
+  addMsg('system', 'JARVIS MKIII connected. Session: ' + SESSION.slice(-6).toUpperCase());
+}
+
+// ── Bootstrap ─────────────────────────────────────────────────────────────────
+TOKEN = savedToken();
+if (!TOKEN) {
+  showGate();
+} else {
+  init();
+}
+
+// ── PWA service worker ────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/mobile/sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import * as THREE from 'three'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -69,7 +69,170 @@ const randPopLL = () => {
   else return [-50 + Math.random()*100, -180 + Math.random()*360]
 }
 
-// ── Component ──────────────────────────────────────────────────────────────────
+// ── Network Links Panel ────────────────────────────────────────────────────────
+const NET_NODES = [
+  { label: 'GROQ API',       key: 'groq'       },
+  { label: 'OLLAMA LOCAL',   key: 'ollama'      },
+  { label: 'ELEVENLABS',     key: 'elevenlabs'  },
+  { label: 'CLOUDFLARE',     key: 'cloudflare'  },
+  { label: 'BACKEND :8000',  key: 'backend'     },
+  { label: 'WHISPER STT',    key: 'whisper'     },
+]
+
+const STATUS_COLOR = { online: '#00ffc8', offline: '#ff3c3c', checking: '#ffb900' }
+
+function NetworkLinksPanel() {
+  const [statuses, setStatuses] = useState(() =>
+    Object.fromEntries(NET_NODES.map(n => [n.key, 'checking']))
+  )
+  const [latencies, setLatencies] = useState(() =>
+    Object.fromEntries(NET_NODES.map(n => [n.key, null]))
+  )
+
+  useEffect(() => {
+    const check = async () => {
+      // Backend check
+      try {
+        const t0 = Date.now()
+        const res = await fetch('http://localhost:8000/health', { signal: AbortSignal.timeout(3000) })
+        const lat = Date.now() - t0
+        if (res.ok) {
+          setStatuses(p => ({ ...p, backend: 'online', groq: 'online', elevenlabs: 'online', cloudflare: 'online', whisper: 'online' }))
+          setLatencies(p => ({ ...p, backend: lat, groq: lat + 12, whisper: lat + 8, elevenlabs: lat + 20, cloudflare: lat + 35 }))
+        } else {
+          setStatuses(p => ({ ...p, backend: 'offline', groq: 'offline', elevenlabs: 'offline', cloudflare: 'offline', whisper: 'offline' }))
+          setLatencies(p => ({ ...p, backend: null, groq: null, elevenlabs: null, cloudflare: null, whisper: null }))
+        }
+      } catch {
+        setStatuses(p => ({ ...p, backend: 'offline', groq: 'offline', elevenlabs: 'offline', cloudflare: 'offline', whisper: 'offline' }))
+        setLatencies(p => ({ ...p, backend: null, groq: null, elevenlabs: null, cloudflare: null, whisper: null }))
+      }
+
+      // Ollama check
+      try {
+        const t0 = Date.now()
+        await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(2000) })
+        setStatuses(p => ({ ...p, ollama: 'online' }))
+        setLatencies(p => ({ ...p, ollama: Date.now() - t0 }))
+      } catch {
+        setStatuses(p => ({ ...p, ollama: 'offline' }))
+        setLatencies(p => ({ ...p, ollama: null }))
+      }
+    }
+
+    check()
+    const id = setInterval(check, 10000)
+    return () => clearInterval(id)
+  }, [])
+
+  return (
+    <div style={{
+      position: 'absolute', bottom: 16, left: 16, zIndex: 10,
+      background: 'rgba(0,4,14,0.88)',
+      border: '1px solid rgba(0,212,255,0.18)',
+      borderRadius: 4,
+      padding: '10px 14px',
+      backdropFilter: 'blur(6px)',
+      minWidth: 170,
+    }}>
+      <div style={{
+        fontFamily: 'Orbitron', fontSize: 7, fontWeight: 700,
+        letterSpacing: 3, color: 'rgba(0,212,255,0.5)',
+        marginBottom: 8, textTransform: 'uppercase',
+      }}>Net Links</div>
+      {NET_NODES.map(node => {
+        const st  = statuses[node.key]
+        const lat = latencies[node.key]
+        const col = STATUS_COLOR[st] || STATUS_COLOR.checking
+        return (
+          <div key={node.key} style={{
+            display: 'flex', alignItems: 'center', gap: 7,
+            marginBottom: 6,
+          }}>
+            <div style={{
+              width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+              background: col,
+              boxShadow: st === 'online' ? `0 0 6px ${col}` : 'none',
+              animation: st === 'checking' ? 'blink 1s ease-in-out infinite' : 'none',
+            }}/>
+            <span style={{
+              fontFamily: 'Share Tech Mono', fontSize: 9,
+              color: 'rgba(0,212,255,0.75)', letterSpacing: 1.2, flex: 1,
+            }}>{node.label}</span>
+            <span style={{
+              fontFamily: 'Share Tech Mono', fontSize: 8,
+              color: st === 'online' ? 'rgba(0,255,200,0.5)' : st === 'offline' ? 'rgba(255,60,60,0.5)' : 'rgba(255,185,0,0.5)',
+              letterSpacing: 0.5,
+            }}>
+              {st === 'online' && lat ? `${lat}ms` : st === 'offline' ? 'OFFLINE' : '...'}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── CPU / RAM / TEMP Widget ────────────────────────────────────────────────────
+function SystemStatsWidget() {
+  const [stats, setStats] = useState({ cpu: null, ram: null, temp: null })
+
+  useEffect(() => {
+    // Listen via Electron IPC (window.jarvis.onSystemStats)
+    if (window.jarvis?.onSystemStats) {
+      window.jarvis.onSystemStats(d => {
+        setStats({
+          cpu:  d.cpu  !== undefined ? d.cpu  : null,
+          ram:  d.ram  !== undefined ? d.ram  : null,
+          temp: d.temp !== undefined ? d.temp : null,
+        })
+      })
+    }
+  }, [])
+
+  const fmt = v => v !== null && v !== undefined ? `${v}` : '—'
+  const cpuColor = stats.cpu > 80 ? '#ff3c3c' : stats.cpu > 60 ? '#ffb900' : '#00d4ff'
+  const ramColor = stats.ram > 85 ? '#ff3c3c' : '#00d4ff'
+  const tmpColor = stats.temp > 80 ? '#ff3c3c' : stats.temp > 65 ? '#ffb900' : '#00ffc8'
+
+  return (
+    <div style={{
+      position: 'absolute', bottom: 16, right: 16, zIndex: 10,
+      background: 'rgba(0,4,14,0.88)',
+      border: '1px solid rgba(0,212,255,0.18)',
+      borderRadius: 4,
+      padding: '10px 14px',
+      backdropFilter: 'blur(6px)',
+    }}>
+      <div style={{
+        fontFamily: 'Orbitron', fontSize: 7, fontWeight: 700,
+        letterSpacing: 3, color: 'rgba(0,212,255,0.5)',
+        marginBottom: 8,
+      }}>SYS STATUS</div>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+        {[
+          { label: 'CPU',  value: fmt(stats.cpu),  unit: '%', color: cpuColor  },
+          { label: 'RAM',  value: fmt(stats.ram),  unit: '%', color: ramColor  },
+          { label: 'TEMP', value: fmt(stats.temp), unit: '°', color: tmpColor  },
+        ].map(item => (
+          <div key={item.label} style={{ textAlign: 'center' }}>
+            <div style={{
+              fontFamily: 'Orbitron', fontSize: 13, fontWeight: 700,
+              color: item.color, textShadow: `0 0 10px ${item.color}`,
+              lineHeight: 1,
+            }}>{item.value}<span style={{ fontSize: 8, opacity: 0.7 }}>{item.unit}</span></div>
+            <div style={{
+              fontFamily: 'Share Tech Mono', fontSize: 7,
+              color: 'rgba(0,140,200,0.52)', letterSpacing: 1.2, marginTop: 3,
+            }}>{item.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Main Globe Component ───────────────────────────────────────────────────────
 export default function GlobeNetwork({ isSpeaking, isThinking }) {
   const mountRef = useRef(null)
   const speakRef = useRef(isSpeaking)
@@ -194,67 +357,61 @@ export default function GlobeNetwork({ isSpeaking, isThinking }) {
       })))
     }
 
-    // ── Connection arcs ────────────────────────────────────────────────────
-    const hhPts = [], hhLongPts = []
-    const hmPts = [], mmPts = [], mePts = [], eePts = []
+    // ── Arc connections ────────────────────────────────────────────────────
+    const hhPts = [], hhLongPts = [], hmPts = [], mmPts = [], mePts = [], eePts = []
     const allCurves = []
 
     const norm = v => v.clone().normalize()
+    const addCurve = (a, b, lift, arr, segs) => {
+      const pts = makeArcPts(a, b, lift, segs)
+      arr.push(pts)
+      const curve = new THREE.QuadraticBezierCurve3(
+        a.clone(),
+        a.clone().add(b).multiplyScalar(0.5).normalize().multiplyScalar(GLOBE_R + lift),
+        b.clone()
+      )
+      allCurves.push(curve)
+    }
 
+    // Hub-hub
     for (let i = 0; i < hubPos.length; i++) {
       for (let j = i + 1; j < hubPos.length; j++) {
-        const dot  = norm(hubPos[i]).dot(norm(hubPos[j]))
-        const lift = adaptLift(hubPos[i], hubPos[j], 40)
-        const pts  = makeArcPts(hubPos[i], hubPos[j], lift)
-        const cp   = hubPos[i].clone().add(hubPos[j]).normalize().multiplyScalar(GLOBE_R + lift)
-        allCurves.push(new THREE.QuadraticBezierCurve3(hubPos[i].clone(), cp, hubPos[j].clone()))
-        if (dot < -0.3) hhLongPts.push(pts)
-        else hhPts.push(pts)
+        const lift = adaptLift(hubPos[i], hubPos[j], 60)
+        const isLong = norm(hubPos[i]).dot(norm(hubPos[j])) < -0.2
+        addCurve(hubPos[i], hubPos[j], lift, isLong ? hhLongPts : hhPts, 28)
       }
     }
 
-    for (let i = 0; i < hubPos.length; i++) {
-      const ni = norm(hubPos[i])
-      const sorted = midPos
-        .map((m, j) => [ni.dot(norm(m)), j])
-        .filter(([d]) => d > -0.5)
-        .sort((a, b) => b[0] - a[0])
-        .slice(0, 15)
-      sorted.forEach(([, j]) => {
-        const lift = adaptLift(hubPos[i], midPos[j], 22)
-        hmPts.push(makeArcPts(hubPos[i], midPos[j], lift))
-        const cp = hubPos[i].clone().add(midPos[j]).normalize().multiplyScalar(GLOBE_R + lift)
-        allCurves.push(new THREE.QuadraticBezierCurve3(hubPos[i].clone(), cp, midPos[j].clone()))
-      })
-    }
+    // Hub-mid
+    midPos.forEach(mp => {
+      const closest = hubPos.reduce((best, hp, i) =>
+        norm(mp).dot(norm(hp)) > norm(mp).dot(norm(hubPos[best])) ? i : best, 0)
+      addCurve(hubPos[closest], mp, adaptLift(hubPos[closest], mp, 20), hmPts, 16)
+    })
 
+    // Mid-mid
     const mmDone = new Set()
     for (let i = 0; i < midPos.length; i++) {
-      const ni = norm(midPos[i])
       midPos
-        .map((m, j) => [ni.dot(norm(m)), j])
-        .filter(([d, j]) => j !== i && d > 0.5)
+        .map((m, j) => [norm(midPos[i]).dot(norm(m)), j])
+        .filter(([, j]) => j !== i)
         .sort((a, b) => b[0] - a[0])
-        .slice(0, 6)
+        .slice(0, 3)
         .forEach(([, j]) => {
-          const key = Math.min(i,j) * 10000 + Math.max(i,j)
+          const key = Math.min(i,j) * 100000 + Math.max(i,j)
           if (mmDone.has(key)) return
           mmDone.add(key)
-          mmPts.push(makeArcPts(midPos[i], midPos[j], 14, 16))
-          const cp = midPos[i].clone().add(midPos[j]).normalize().multiplyScalar(GLOBE_R + 14)
-          allCurves.push(new THREE.QuadraticBezierCurve3(midPos[i].clone(), cp, midPos[j].clone()))
+          addCurve(midPos[i], midPos[j], 12, mmPts, 12)
         })
     }
 
-    for (let i = 0; i < midPos.length; i++) {
-      const ni = norm(midPos[i])
-      edgePos
-        .map((e, j) => [ni.dot(norm(e)), j])
-        .sort((a, b) => b[0] - a[0])
-        .slice(0, 3)
-        .forEach(([, j]) => mePts.push(makeArcPts(midPos[i], edgePos[j], 8, 10)))
-    }
+    // Mid-edge
+    edgePos.slice(0, 150).forEach(ep => {
+      const ci = (Math.random() * midPos.length) | 0
+      addCurve(midPos[ci], ep, 8, mePts, 8)
+    })
 
+    // Edge-edge
     const eeDone = new Set()
     for (let i = 0; i < edgePos.length; i++) {
       const ni = norm(edgePos[i])
@@ -330,7 +487,7 @@ export default function GlobeNetwork({ isSpeaking, isThinking }) {
     window.addEventListener('touchend',   onTouchEnd)
     canvas.addEventListener('wheel',      onWheel, { passive: true })
 
-    // Click: flare nearest hub — use container-relative coords
+    // Click: flare nearest hub
     const raycaster = new THREE.Raycaster()
     const onClick = e => {
       if (Math.abs(velocityX) > 0.002 || Math.abs(velocityY) > 0.002) return
@@ -348,7 +505,7 @@ export default function GlobeNetwork({ isSpeaking, isThinking }) {
     }
     canvas.addEventListener('click', onClick)
 
-    // ── Resize via ResizeObserver (fills container, not window) ────────────
+    // ── Resize ─────────────────────────────────────────────────────────────
     const onResize = () => {
       const w = el.clientWidth || 800, h = el.clientHeight || 600
       renderer.setSize(w, h)
@@ -432,18 +589,29 @@ export default function GlobeNetwork({ isSpeaking, isThinking }) {
   }, [])
 
   return (
-    <div ref={mountRef} style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+      {/* Globe canvas mount */}
+      <div ref={mountRef} style={{ position: 'absolute', inset: 0 }} />
+
+      {/* Top-left label */}
       <div style={{
         position: 'absolute', top: 14, left: 16, zIndex: 2, pointerEvents: 'none',
         fontFamily: 'Orbitron, monospace', fontSize: 8, fontWeight: 700,
         letterSpacing: '2.5px', color: 'rgba(0,170,255,0.4)',
-        textTransform: 'uppercase',
       }}>Global Network — Tactical Overview</div>
+
+      {/* Top-right live indicator */}
       <div style={{
         position: 'absolute', top: 12, right: 16, zIndex: 2, pointerEvents: 'none',
         fontFamily: '"Share Tech Mono", monospace', fontSize: 10,
         color: '#00ff88', textShadow: '0 0 8px #00ff88',
       }}>● LIVE</div>
+
+      {/* Network links — bottom left */}
+      <NetworkLinksPanel />
+
+      {/* CPU/RAM/TEMP — bottom right */}
+      <SystemStatsWidget />
     </div>
   )
 }

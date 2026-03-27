@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import './App.css'
+import NetworkLinks from './components/NetworkLinks'
 import WorldStatePanel from './WorldStatePanel'
 import AgentFeed from './AgentFeed'
 import AutonomousAlerts from './AutonomousAlerts'
@@ -11,6 +12,10 @@ import StrategyTab from './tabs/StrategyTab'
 import MissionBoardTab from './tabs/MissionBoardTab'
 import LifeOSTab from './tabs/LifeOSTab'
 import CommsTab from './tabs/CommsTab'
+import WhatsAppTab from './tabs/WhatsAppTab'
+import VisionTab from './tabs/VisionTab'
+import ProactiveTab from './tabs/ProactiveTab'
+import MemoryTab from './tabs/MemoryTab'
 
 const TABS = [
   { key:'BRIDGE',   label:'BRIDGE'   },
@@ -19,6 +24,10 @@ const TABS = [
   { key:'MISSIONS', label:'MISSIONS' },
   { key:'LIFE OS',  label:'LIFE OS'  },
   { key:'COMMS',    label:'COMMS'    },
+  { key:'WHATSAPP',   label:'WHATSAPP'   },
+  { key:'VISION',     label:'VISION'     },
+  { key:'PROACTIVE',  label:'PROACTIVE'  },
+  { key:'MEMORY',     label:'MEMORY'     },
 ]
 
 const BOOT_STEPS = [
@@ -120,6 +129,7 @@ const HUD = () => {
   const [activeTier,        setActiveTier]        = useState('local')
   const [proactiveAlerts,   setProactiveAlerts]   = useState([])
   const [activeTab,         setActiveTab]         = useState('BRIDGE')
+  const [voiceState,        setVoiceState]        = useState(null)
   const chatEndRef     = useRef(null)
   const wsRef          = useRef(null)
   const pendingVoiceId = useRef(null)
@@ -200,6 +210,15 @@ const HUD = () => {
     }
   }, [connectWS])
 
+  // Emotion state polling (5s interval — BRIDGE chat panel indicator)
+  useEffect(() => {
+    const fetchEmotion = () =>
+      fetch(`${API}/emotion/state`).then(r => r.json()).then(d => setVoiceState(d)).catch(() => {})
+    fetchEmotion()
+    const id = setInterval(fetchEmotion, 5000)
+    return () => clearInterval(id)
+  }, [])
+
   // GitHub polling
   useEffect(() => {
     const fg = () => fetch(`${API}/github`).then(r => r.json()).then(d => { if (Array.isArray(d)) setRepos(d) }).catch(() => {})
@@ -228,6 +247,15 @@ const HUD = () => {
     if (!input.trim() || isThinking) return
     const lower = input.trim().toLowerCase()
     if (['shutdown', 'power down', 'jarvis shutdown', 'offline'].includes(lower)) { setInput(''); triggerShutdown(); return }
+    if (['calibrate', 'run calibration'].includes(lower)) {
+      setInput('')
+      const jid = Date.now() + 1
+      setMessages(prev => [...prev, { id: Date.now(), text: input, type:'user' }, { id: jid, text:'Recording 10-second baseline. Speak normally, sir...', type:'jarvis' }])
+      fetch(`${API}/emotion/calibrate`, { method:'POST' })
+        .then(() => setMessages(prev => prev.map(m => m.id === jid ? { ...m, text:'Calibration complete, sir. Baseline locked.' } : m)))
+        .catch(() => setMessages(prev => prev.map(m => m.id === jid ? { ...m, text:'Calibration failed, sir.' } : m)))
+      return
+    }
     const jid = Date.now() + 1
     setMessages(prev => [...prev, { id: Date.now(), text: input, type: 'user' }, { id: jid, text: '', type: 'jarvis' }])
     setInput('')
@@ -263,6 +291,9 @@ const HUD = () => {
 
   const tierColor = activeTier === 'reasoning' ? '#ffb900' : activeTier === 'local' ? '#00ffc8' : '#00d4ff'
   const tierLabel = activeTier === 'reasoning' ? 'LLAMA 3.3 — REASONING' : activeTier === 'local' ? 'LLAMA 3.2 — LOCAL' : 'LLAMA 3.3 — VOICE'
+
+  const _vsColors = { focused:'#00ffc8', fatigued:'#4488ff', stressed:'#ffb900', elevated:'#ff6644', neutral:'rgba(0,140,200,0.4)' }
+  const voiceStateColor = _vsColors[voiceState?.state] || _vsColors.neutral
 
   const handleProactiveDismiss = useCallback(async (alertId) => {
     setProactiveAlerts(prev => prev.filter(a => a.id !== alertId))
@@ -444,7 +475,10 @@ const HUD = () => {
       <div style={{ gridColumn: '2', gridRow: '2', position: 'relative', overflow: 'hidden', display: activeTab === 'BRIDGE' ? 'block' : 'none' }}>
 
         {/* Globe fills the entire column */}
-        <GlobeNetwork isSpeaking={isSpeaking} isThinking={isThinking}/>
+        <GlobeNetwork isActive={activeTab === 'BRIDGE'} isSpeaking={isSpeaking} isThinking={isThinking}/>
+
+        {/* Network link status badges — top-right of globe column */}
+        <NetworkLinks/>
 
         {/* JARVIS title — centered overlay */}
         <div style={{
@@ -513,6 +547,26 @@ const HUD = () => {
           <CommsTab/>
         </div>
       )}
+      {activeTab === 'WHATSAPP' && (
+        <div style={{ gridColumn: '1 / -1', gridRow: '2', overflow: 'hidden' }}>
+          <WhatsAppTab/>
+        </div>
+      )}
+      {activeTab === 'VISION' && (
+        <div style={{ gridColumn: '1 / -1', gridRow: '2', overflow: 'hidden' }}>
+          <VisionTab/>
+        </div>
+      )}
+      {activeTab === 'PROACTIVE' && (
+        <div style={{ gridColumn: '1 / -1', gridRow: '2', overflow: 'hidden' }}>
+          <ProactiveTab/>
+        </div>
+      )}
+      {activeTab === 'MEMORY' && (
+        <div style={{ gridColumn: '1 / -1', gridRow: '2', overflow: 'hidden' }}>
+          <MemoryTab/>
+        </div>
+      )}
 
       {/* ── TICKER — bottom row spanning all columns ──────────────────────────── */}
       <div style={{ gridColumn: '1 / -1', gridRow: '3' }}>
@@ -539,9 +593,17 @@ const HUD = () => {
       >
         <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:13 }}>
           <div style={{ ...S.panelTitle, marginBottom:0 }}>J.A.R.V.I.S INTERFACE</div>
-          <div style={{ display:'flex',alignItems:'center',gap:5 }}>
-            <div style={{ width:5,height:5,borderRadius:'50%',background:tierColor,boxShadow:`0 0 6px ${tierColor}` }}/>
-            <span style={{ fontFamily:'Share Tech Mono',fontSize:8,color:tierColor,letterSpacing:1 }}>{tierLabel}</span>
+          <div style={{ display:'flex',alignItems:'center',gap:10 }}>
+            <div style={{ display:'flex',alignItems:'center',gap:5 }}>
+              <div style={{ width:5,height:5,borderRadius:'50%',background:tierColor,boxShadow:`0 0 6px ${tierColor}` }}/>
+              <span style={{ fontFamily:'Share Tech Mono',fontSize:8,color:tierColor,letterSpacing:1 }}>{tierLabel}</span>
+            </div>
+            {voiceState && (
+              <div style={{ display:'flex',alignItems:'center',gap:5 }}>
+                <div style={{ width:5,height:5,borderRadius:'50%',background:voiceStateColor,boxShadow:`0 0 6px ${voiceStateColor}` }}/>
+                <span style={{ fontFamily:'Share Tech Mono',fontSize:8,color:voiceStateColor,letterSpacing:1 }}>{(voiceState.state||'neutral').toUpperCase()}</span>
+              </div>
+            )}
           </div>
         </div>
         <div style={S.chatLog}>

@@ -209,25 +209,36 @@ export default function WorldStatePanel() {
     const poll = () =>
       fetch(`${API}/status`).then(r => r.json()).then(d => setStatus(d)).catch(() => {})
     poll()
-    const id = setInterval(poll, 10000)
+    const id = setInterval(poll, 30000)
     return () => clearInterval(id)
   }, [])
 
+  // Uptime counter — lightweight, no setState on CPU/RAM
   useEffect(() => {
-    const id = setInterval(() => {
-      setCpu(prev => Math.min(100, Math.max(5, prev + (Math.random() - 0.48) * 8)))
-      setRam(prev => Math.min(100, Math.max(20, prev + (Math.random() - 0.5) * 3)))
-      setUptime(u => u + 1)
-    }, 1000)
+    const id = setInterval(() => setUptime(u => u + 30), 30000)
     return () => clearInterval(id)
   }, [])
 
+  // Real system stats — Electron IPC if available, HTTP /diagnostic fallback otherwise
   useEffect(() => {
     if (window.jarvis) {
       window.jarvis.onSystemStats(d => {
         if (d.cpu !== undefined) setCpu(d.cpu)
         if (d.ram !== undefined) setRam(d.ram)
       })
+    } else {
+      const poll = () =>
+        fetch(`${API}/diagnostic`)
+          .then(r => r.json())
+          .then(d => {
+            const sys = d.system || {}
+            if (sys.cpu !== undefined) setCpu(sys.cpu)
+            if (sys.ram !== undefined) setRam(sys.ram)
+          })
+          .catch(() => {})
+      poll()
+      const id = setInterval(poll, 10000)
+      return () => clearInterval(id)
     }
   }, [])
 

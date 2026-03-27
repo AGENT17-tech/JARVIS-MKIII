@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 
 const API = 'http://localhost:8000'
 
@@ -27,14 +28,30 @@ const PRINCIPLES = [
   'Every idle hour is a debt paid with future regret.',
 ]
 
+const PHANTOM_DOMAINS = [
+  { key:'engineering', label:'ENGINEERING & ROBOTICS',  color:'#00d4ff', target:80 },
+  { key:'programming', label:'PROGRAMMING & CYBER',     color:'#00ffc8', target:85 },
+  { key:'combat',      label:'COMBAT & PHYSICAL',       color:'#ff6644', target:75 },
+  { key:'strategy',    label:'STRATEGIC THINKING',      color:'#ffb900', target:70 },
+  { key:'neuro',       label:'NEURO-PERFORMANCE',       color:'#a78bfa', target:75 },
+]
+
 export default function LifeOSTab() {
-  const [briefing, setBriefing]   = useState('Loading morning briefing...')
-  const [loading,  setLoading]    = useState(true)
-  const [question, setQuestion]   = useState('')
-  const [advice,   setAdvice]     = useState(null)
-  const [asking,   setAsking]     = useState(false)
-  const [habits,   setHabits]     = useState(HABITS)
-  const [principle] = useState(() => PRINCIPLES[Math.floor(Math.random() * PRINCIPLES.length)])
+  const [briefing,      setBriefing]      = useState('Loading morning briefing...')
+  const [loading,       setLoading]       = useState(true)
+  const [question,      setQuestion]      = useState('')
+  const [advice,        setAdvice]        = useState(null)
+  const [asking,        setAsking]        = useState(false)
+  const [habits,        setHabits]        = useState(HABITS)
+  const [principle]                       = useState(() => PRINCIPLES[Math.floor(Math.random() * PRINCIPLES.length)])
+  const [lastBriefing,  setLastBriefing]  = useState(null)
+  const [briefingRunning, setBriefingRunning] = useState(false)
+  const [ttsStatus,     setTtsStatus]     = useState(null)
+  const [tunnelUrl,     setTunnelUrl]     = useState(null)
+  const [tunnelCopied,  setTunnelCopied]  = useState(false)
+  const [tunnelChecked, setTunnelChecked] = useState(false)
+  const [phantomScores, setPhantomScores] = useState(null)
+  const [phantomPriority, setPhantomPriority] = useState('')
 
   useEffect(() => {
     setLoading(true)
@@ -52,6 +69,72 @@ export default function LifeOSTab() {
       .catch(() => setBriefing('Briefing uplink offline. Proceeding on discipline alone, sir.'))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    fetch(`${API}/briefing/last`)
+      .then(r => r.json())
+      .then(d => { if (d.spoken) setLastBriefing(d) })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const fetchTts = () =>
+      fetch(`${API}/tts/status`)
+        .then(r => r.json())
+        .then(d => setTtsStatus(d))
+        .catch(() => {})
+    fetchTts()
+  }, [])
+
+  useEffect(() => {
+    const fetchTunnel = () =>
+      fetch(`${API}/tunnel/status`)
+        .then(r => r.json())
+        .then(d => { setTunnelChecked(true); if (d.active && d.url) setTunnelUrl(d.url) })
+        .catch(() => setTunnelChecked(true))
+    fetchTunnel()
+    const id = setInterval(fetchTunnel, 30000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    const fetchPhantom = () => {
+      fetch(`${API}/phantom/scores`)
+        .then(r => r.json())
+        .then(d => setPhantomScores(d))
+        .catch(() => {})
+      fetch(`${API}/phantom/priority`)
+        .then(r => r.json())
+        .then(d => setPhantomPriority(d.recommendation || ''))
+        .catch(() => {})
+    }
+    fetchPhantom()
+    const id = setInterval(fetchPhantom, 60000)
+    return () => clearInterval(id)
+  }, [])
+
+  const copyTunnelUrl = () => {
+    if (!tunnelUrl) return
+    navigator.clipboard.writeText(`${tunnelUrl}/mobile`).then(() => {
+      setTunnelCopied(true)
+      setTimeout(() => setTunnelCopied(false), 2000)
+    })
+  }
+
+  const runBriefing = async () => {
+    if (briefingRunning) return
+    setBriefingRunning(true)
+    try {
+      const res = await fetch(`${API}/briefing/run`)
+      const d   = await res.json()
+      if (d.spoken) setLastBriefing(d)
+    } catch {
+      // silently ignore — TTS and terminal output still happen server-side
+    } finally {
+      setBriefingRunning(false)
+      fetch(`${API}/tts/status`).then(r => r.json()).then(d => setTtsStatus(d)).catch(() => {})
+    }
+  }
 
   const askAdvice = async () => {
     if (!question.trim() || asking) return
@@ -92,12 +175,38 @@ export default function LifeOSTab() {
           <div style={{ ...T.panel, padding:'14px 18px', flexShrink:0 }}>
             <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
               <div style={{ ...T.title }}>◈ MORNING BRIEFING</div>
-              <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:5 }}>
-                <div style={{ width:5, height:5, borderRadius:'50%', background: loading?'#ffb900':'#00ffc8', boxShadow:`0 0 7px ${loading?'#ffb900':'#00ffc8'}`, animation: loading?'blink 0.8s ease-in-out infinite':'none' }}/>
-                <span style={{ ...T.dim, fontSize:7 }}>{loading ? 'LOADING' : 'READY'}</span>
+              <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                  <div style={{ width:5, height:5, borderRadius:'50%', background: loading?'#ffb900':'#00ffc8', boxShadow:`0 0 7px ${loading?'#ffb900':'#00ffc8'}`, animation: loading?'blink 0.8s ease-in-out infinite':'none' }}/>
+                  <span style={{ ...T.dim, fontSize:7 }}>{loading ? 'LOADING' : 'READY'}</span>
+                </div>
+                {ttsStatus && (
+                  <div style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 8px', border:`1px solid ${ttsStatus.kokoro_ready?'rgba(0,255,200,0.3)':'rgba(255,100,0,0.3)'}`, borderRadius:2 }}>
+                    <div style={{ width:5, height:5, borderRadius:'50%', background: ttsStatus.kokoro_ready?'#00ffc8':'#ff6400', boxShadow:`0 0 6px ${ttsStatus.kokoro_ready?'#00ffc8':'#ff6400'}` }}/>
+                    <span style={{ fontFamily:'Share Tech Mono', fontSize:7, color: ttsStatus.kokoro_ready?'rgba(0,255,200,0.8)':'rgba(255,100,0,0.8)', letterSpacing:1 }}>
+                      {ttsStatus.kokoro_ready ? 'KOKORO' : 'TTS LOADING'}
+                    </span>
+                  </div>
+                )}
+                <button onClick={runBriefing} disabled={briefingRunning}
+                  style={{ background:'none', border:'1px solid rgba(0,212,255,0.35)', borderRadius:2, color: briefingRunning?'rgba(0,212,255,0.35)':'rgba(0,212,255,0.8)', fontFamily:'Orbitron', fontSize:7, letterSpacing:2, padding:'4px 10px', cursor: briefingRunning?'default':'pointer', transition:'all 0.2s ease' }}>
+                  {briefingRunning ? '...' : 'RUN BRIEFING'}
+                </button>
               </div>
             </div>
             <div style={{ ...T.body, lineHeight:1.8, fontSize:10 }}>{briefing}</div>
+            {lastBriefing && (
+              <div style={{ marginTop:10, borderTop:'1px solid rgba(0,212,255,0.1)', paddingTop:10 }}>
+                <div style={{ ...T.dim, fontSize:7, marginBottom:6 }}>
+                  LAST BRIEFING — {lastBriefing.date} {lastBriefing.time}
+                </div>
+                <textarea
+                  readOnly
+                  value={lastBriefing.spoken || ''}
+                  style={{ width:'100%', background:'rgba(0,4,14,0.5)', border:'1px solid rgba(0,212,255,0.12)', borderRadius:2, color:'rgba(120,190,255,0.75)', fontFamily:'Share Tech Mono', fontSize:9, lineHeight:1.6, padding:'8px 10px', resize:'none', outline:'none', minHeight:72, boxSizing:'border-box' }}
+                />
+              </div>
+            )}
           </div>
 
           {/* Today's principle */}
@@ -128,8 +237,46 @@ export default function LifeOSTab() {
           </div>
         </div>
 
-        {/* Right — Habit tracker */}
-        <div style={{ ...T.panel, padding:'14px 18px', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+        {/* Right — Phantom Zero + Habit tracker */}
+        <div style={{ display:'flex', flexDirection:'column', gap:10, overflow:'hidden' }}>
+
+          {/* PHANTOM ZERO — Domain Status */}
+          <div style={{ ...T.panel, padding:'14px 18px', flexShrink:0 }}>
+            <div style={{ ...T.title, marginBottom:10 }}>◈ PHANTOM ZERO — DOMAIN STATUS</div>
+            {phantomScores ? (
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {PHANTOM_DOMAINS.map(d => {
+                  const info  = phantomScores[d.key] || {}
+                  const score = info.score ?? 25
+                  const pct   = Math.min(100, score)
+                  const tPct  = d.target
+                  return (
+                    <div key={d.key}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:3 }}>
+                        <span style={{ fontFamily:'Orbitron', fontSize:8, letterSpacing:2, color:'rgba(160,215,255,0.7)' }}>{d.label}</span>
+                        <span style={{ fontFamily:'Orbitron', fontSize:18, fontWeight:700, color:d.color, lineHeight:1 }}>{score}</span>
+                      </div>
+                      <div style={{ position:'relative', height:3, background:'rgba(0,212,255,0.1)', borderRadius:2, overflow:'visible' }}>
+                        <div style={{ height:'100%', width:`${pct}%`, background:d.color, boxShadow:`0 0 6px ${d.color}88`, borderRadius:2, transition:'width 0.6s ease' }}/>
+                        {/* Target indicator */}
+                        <div style={{ position:'absolute', top:-2, left:`${tPct}%`, width:1, height:7, background:'rgba(255,255,255,0.4)', borderRadius:1 }}/>
+                      </div>
+                    </div>
+                  )
+                })}
+                {phantomPriority && (
+                  <div style={{ marginTop:6, fontFamily:'Share Tech Mono', fontSize:9, color:'rgba(160,215,255,0.55)', lineHeight:1.5, borderTop:'1px solid rgba(0,212,255,0.1)', paddingTop:6 }}>
+                    {phantomPriority}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ ...T.dim }}>Loading domain scores...</div>
+            )}
+          </div>
+
+          {/* Habit tracker */}
+          <div style={{ ...T.panel, padding:'14px 18px', display:'flex', flexDirection:'column', overflow:'hidden', flex:1 }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
             <div style={{ ...T.title }}>◇ HABIT TRACKER</div>
             <div style={{ fontFamily:'Orbitron', fontSize:18, fontWeight:700, color:'#00ffc8' }}>{doneCount}/{habits.length}</div>
@@ -164,6 +311,44 @@ export default function LifeOSTab() {
             </div>
           </div>
         </div>
+        </div>{/* end right column */}
+      </div>
+
+      {/* Tunnel panel */}
+      <div style={{ ...T.panel, padding:'12px 18px', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom: tunnelUrl ? 12 : 0 }}>
+          <div style={{ ...T.title }}>◈ MOBILE ACCESS</div>
+          <div style={{ display:'flex', alignItems:'center', gap:5, marginLeft:8 }}>
+            <div style={{ width:5, height:5, borderRadius:'50%', background: tunnelUrl?'#00ffc8':'#ff6400', boxShadow:`0 0 6px ${tunnelUrl?'#00ffc8':'#ff6400'}`, animation: tunnelUrl?'none':'blink 1s ease-in-out infinite' }}/>
+            <span style={{ ...T.dim, fontSize:7 }}>{tunnelUrl ? 'TUNNEL ACTIVE' : tunnelChecked ? 'OFFLINE' : 'CONNECTING...'}</span>
+          </div>
+          {tunnelUrl && (
+            <div style={{ marginLeft:'auto', display:'flex', gap:6 }}>
+              <button onClick={copyTunnelUrl}
+                style={{ background:'none', border:'1px solid rgba(0,212,255,0.35)', borderRadius:2, color: tunnelCopied?'#00ffc8':'rgba(0,212,255,0.8)', fontFamily:'Orbitron', fontSize:7, letterSpacing:2, padding:'4px 10px', cursor:'pointer' }}>
+                {tunnelCopied ? 'COPIED' : 'COPY URL'}
+              </button>
+              <a href={`${tunnelUrl}/mobile`} target="_blank" rel="noopener noreferrer"
+                style={{ background:'none', border:'1px solid rgba(0,255,200,0.3)', borderRadius:2, color:'rgba(0,255,200,0.8)', fontFamily:'Orbitron', fontSize:7, letterSpacing:2, padding:'4px 10px', textDecoration:'none', display:'flex', alignItems:'center' }}>
+                OPEN
+              </a>
+            </div>
+          )}
+        </div>
+        {tunnelUrl && (
+          <div style={{ display:'flex', gap:16, alignItems:'flex-start' }}>
+            <div style={{ background:'#fff', padding:6, borderRadius:3, flexShrink:0 }}>
+              <QRCodeSVG value={`${tunnelUrl}/mobile`} size={96} level="M" />
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:4, justifyContent:'center', paddingTop:4 }}>
+              <div style={{ ...T.dim, fontSize:7, marginBottom:2 }}>SCAN TO ACCESS FROM PHONE</div>
+              <div style={{ fontFamily:'Share Tech Mono', fontSize:9, color:'rgba(0,212,255,0.7)', wordBreak:'break-all', lineHeight:1.5 }}>
+                {tunnelUrl}/mobile
+              </div>
+              <div style={{ ...T.dim, fontSize:7, marginTop:4 }}>Token: phantom-zero-2026</div>
+            </div>
+          </div>
+        )}
       </div>
 
       <style>{`@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }`}</style>

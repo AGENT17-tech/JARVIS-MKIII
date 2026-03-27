@@ -26,13 +26,19 @@ Endpoints:
 
 from __future__ import annotations
 import asyncio, datetime, json, os, uuid, time as _time
+from collections import deque
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 
 _START_TIME = _time.time()   # track uptime for /diagnostic
+
+# ── Watchdog alert store ───────────────────────────────────────────────────────
+_alert_store: deque[dict] = deque(maxlen=50)
 
 from core.router import classify, TaskTier, RoutingDecision
 from core.dispatcher import dispatch
@@ -50,6 +56,19 @@ from system.terminal_controller import (
     execute, smart_install, remove_package, update_system, format_result,
 )
 from agents.agent_dispatcher import agent_router, dispatcher as agent_dispatcher
+from api.routers.whatsapp import router as whatsapp_router
+from api.routers.vision import vision_router
+from api.routers.proactive import proactive_router
+from api.routers.rag import rag_router
+from api.routers.td import td_router
+from api.routers.memory import memory_router
+from api.routers.phantom import phantom_router
+from api.routers.emotion import emotion_router
+from tunnel.tunnel_manager import tunnel as _tunnel
+from core.mobile_auth import MobileAuthMiddleware
+from vision.vision_engine import analyze_screenshot as _llava_screenshot
+
+_MOBILE_DIR = os.path.join(os.path.dirname(__file__), "..", "mobile")
 
 
 # ── Startup / shutdown lifecycle ──────────────────────────────────────────────
@@ -71,13 +90,30 @@ async def lifespan(app: FastAPI):
     monitor.start()
     # Start daily adaptive analysis loop
     analysis_task = asyncio.create_task(_daily_analysis_loop())
-    # Start proactive intelligence engine
+    # Start proactive intelligence engine (existing — morning briefing, idle, EOD)
     from core.proactive_engine import engine as proactive_engine
     proactive_engine.start()
+    # Start autonomous proactive agent (new — unified 60s scan, weather, WhatsApp, history API)
+    from agents.proactive_agent import agent as proactive_agent
+    proactive_agent.start()
+    # Start Cloudflare Quick Tunnel for remote mobile access
+    asyncio.get_event_loop().run_in_executor(None, _tunnel.start)
+    # Announce tunnel online via TTS (runs in background — waits up to 25s for URL)
+    async def _announce_tunnel():
+        for _ in range(50):
+            await asyncio.sleep(0.5)
+            if _tunnel.get_url():
+                await request_speak("JARVIS online. Public mobile access active.")
+                return
+    asyncio.create_task(_announce_tunnel())
+    # Auto-run morning briefing if it hasn't run today
+    from briefing.morning_briefing import auto_run_if_new_day as _briefing_auto_run
+    asyncio.create_task(_briefing_auto_run())
     yield
     # Shutdown
     monitor.stop()
     proactive_engine.stop()
+    proactive_agent.stop()
     analysis_task.cancel()
     try:
         from system.browser_agent import browser
@@ -89,20 +125,50 @@ async def lifespan(app: FastAPI):
         await mcp_close_all()
     except Exception:
         pass
+    _tunnel.stop()
 
 
 app = FastAPI(title="JARVIS-MKIII", version="3.3.0", lifespan=lifespan)
 
+app.add_middleware(MobileAuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-JARVIS-Token"],
 )
 
 app.include_router(voice_router)     # /ws/hud-voice-bridge + /ws/{session_id}
 app.include_router(weather_router)   # /weather + /calendar + /forecast
 app.include_router(agent_router)     # /agents + /ws/agents
+app.include_router(whatsapp_router)  # /whatsapp/*
+app.include_router(vision_router)    # /vision/*
+app.include_router(proactive_router) # /proactive/*
+app.include_router(rag_router)       # /rag/*
+app.include_router(td_router)        # /td/*
+app.include_router(memory_router)    # /memory/*
+app.include_router(phantom_router)   # /phantom/*
+app.include_router(emotion_router)   # /emotion/*
+
+# ── Mobile PWA endpoints ───────────────────────────────────────────────────────
+@app.get("/mobile", include_in_schema=False)
+async def mobile_ui():
+    return FileResponse(os.path.join(_MOBILE_DIR, "index.html"), media_type="text/html")
+
+@app.get("/mobile/manifest.json", include_in_schema=False)
+async def mobile_manifest():
+    return FileResponse(os.path.join(_MOBILE_DIR, "manifest.json"), media_type="application/json")
+
+@app.get("/mobile/sw.js", include_in_schema=False)
+async def mobile_sw():
+    return FileResponse(os.path.join(_MOBILE_DIR, "sw.js"), media_type="application/javascript")
+
+
+# ── Tunnel status ──────────────────────────────────────────────────────────────
+@app.get("/tunnel/status")
+async def tunnel_status():
+    url = _tunnel.get_url()
+    return {"url": url, "active": url is not None}
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -208,6 +274,23 @@ async def _execute_pending(action: str, payload: str | None) -> str:
             return await _run_os_op(op_data)
         except Exception as e:
             return f"That did not go as planned, sir. {e}"
+    elif action == "rag_clear":
+        try:
+            from memory.rag_memory import get_rag as _get_rag
+            import memory.rag_memory as _rm
+            rag = _get_rag()
+            for _col_name in ("conversations", "facts", "missions"):
+                try:
+                    rag._client.delete_collection(_col_name)
+                    rag._client.get_or_create_collection(
+                        _col_name, metadata={"hnsw:space": "cosine"}
+                    )
+                except Exception:
+                    pass
+            _rm._rag = None
+            return "Long-term memory cleared, sir. All episodic records erased."
+        except Exception as _e:
+            return f"Memory clear failed, sir. {_e}"
     else:
         return "I'm not sure what to execute, sir."
     return format_result(action, payload, result)
@@ -509,11 +592,14 @@ async def chat(req: ChatRequest):
             return _quick_response(response_text, session_id)
 
         if action == "vision":
-            response_text = await _spawn_agent("vision", payload or req.prompt)
+            try:
+                response_text = await _llava_screenshot(req.prompt)
+            except Exception as _ve:
+                # LLaVA unavailable — fall back to Claude vision agent
+                response_text = await _spawn_agent("vision", payload or req.prompt)
             memory.record(session_id, "user",      req.prompt,    tier="voice")
             memory.record(session_id, "assistant", response_text, tier="voice")
-            if session_id != "voice-pipeline":
-                await request_speak(response_text)
+            await request_speak(response_text)
             return _quick_response(response_text, session_id)
 
         if action == "dev":
@@ -646,6 +732,149 @@ async def chat(req: ChatRequest):
             await request_speak(response_text)
             return _quick_response(response_text, session_id)
 
+        # ── WhatsApp ──────────────────────────────────────────────────────────
+        if action == "whatsapp":
+            response_text = await _handle_whatsapp_voice(req.prompt)
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            if session_id != "voice-pipeline":
+                await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        # ── Proactive agent voice commands ────────────────────────────────────
+        if action == "proactive_silence":
+            from agents.proactive_agent import agent as _pa
+            import re as _re
+            _m = _re.search(r'(\d+)\s*(?:hour|hr)', req.prompt.lower())
+            if _m:
+                _mins = int(_m.group(1)) * 60
+            else:
+                _m = _re.search(r'(\d+)\s*(?:minute|min)', req.prompt.lower())
+                _mins = int(_m.group(1)) if _m else 60
+            import time as _t
+            _pa._silenced_until = _t.time() + _mins * 60
+            _label = f"{_mins // 60} hour{'s' if _mins // 60 != 1 else ''}" if _mins >= 60 else f"{_mins} minute{'s' if _mins != 1 else ''}"
+            response_text = f"Focus mode active, sir. Notifications silenced for {_label}."
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        if action == "proactive_resume":
+            from agents.proactive_agent import agent as _pa
+            _pa._silenced_until = 0.0
+            response_text = "Notifications resumed, sir. Proactive monitoring is active."
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        if action == "proactive_catchup":
+            from agents.proactive_agent import agent as _pa
+            recent = list(reversed(_pa._history[-5:]))
+            if not recent:
+                response_text = "No proactive alerts on record, sir. All clear."
+            else:
+                parts = []
+                for _alert in recent:
+                    try:
+                        _ts = datetime.fromisoformat(_alert["timestamp"]).strftime("%H:%M")
+                    except Exception:
+                        _ts = "earlier"
+                    parts.append(f"At {_ts}, {_alert['source']}: {_alert['message']}")
+                response_text = (
+                    f"Here are your last {len(recent)} alert{'s' if len(recent) != 1 else ''}, sir. "
+                    + " | ".join(parts)
+                )
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        if action == "proactive_scan":
+            from agents.proactive_agent import agent as _pa
+            _pa._alerts_today.clear()
+            asyncio.create_task(_pa._scan_all())
+            response_text = "Running full system scan now, sir. I will report any findings."
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        if action == "tunnel_url":
+            url = _tunnel.get_url()
+            if url:
+                response_text = f"Your public URL is {url}/mobile. Check the HUD for the QR code, sir."
+            else:
+                response_text = "The tunnel is still connecting, sir. Check back in a few seconds."
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        # ── Morning briefing ──────────────────────────────────────────────────
+        if action == "briefing":
+            from briefing.morning_briefing import run_briefing
+            try:
+                bdict = await run_briefing()
+                response_text = bdict["spoken"]
+            except Exception as e:
+                response_text = f"Briefing system encountered an error, sir. {e}"
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            # TTS already called inside run_briefing(); skip to avoid double-speak
+            return _quick_response(response_text, session_id)
+
+        # ── RAG: recall from long-term memory ────────────────────────────────
+        if action == "rag_recall":
+            try:
+                from memory.rag_memory import get_rag as _get_rag
+                _memories = _get_rag().recall(req.prompt, n_results=3)
+                if "No relevant" in _memories or not _memories.strip():
+                    response_text = "I don't have any relevant memories on that topic, sir."
+                else:
+                    response_text = f"From my long-term memory, sir: {_memories}"
+            except Exception as _e:
+                response_text = f"Memory recall failed, sir. {_e}"
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            await request_speak(response_text[:500])
+            return _quick_response(response_text, session_id)
+
+        # ── RAG: store a fact ─────────────────────────────────────────────────
+        if action == "rag_store":
+            import re as _re
+            # Strip the trigger phrase to get the actual fact
+            _fact = _re.sub(
+                r'^(remember\s+that|store\s+this\s+fact|make\s+a\s+note|'
+                r'save\s+this\s+to\s+(memory|long-term)|add\s+(this\s+)?to\s+'
+                r'(your\s+)?memory|keep\s+(this|that)\s+in\s+mind|'
+                r"don'?t\s+forget\s+that)[:\s]+",
+                "", req.prompt, flags=_re.IGNORECASE,
+            ).strip() or req.prompt
+            try:
+                from memory.rag_memory import get_rag as _get_rag
+                _get_rag().store_fact(_fact, source="voice")
+                response_text = "Stored in long-term memory, sir."
+            except Exception as _e:
+                response_text = f"Memory store failed, sir. {_e}"
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
+        # ── RAG: clear memory (requires confirmation) ─────────────────────────
+        if action == "rag_clear":
+            _pending[session_id] = {"action": "rag_clear", "payload": None}
+            response_text = (
+                "Sir, this will erase all long-term episodic memory permanently. "
+                "Confirm with 'yes' to proceed."
+            )
+            memory.record(session_id, "user",      req.prompt,    tier="voice")
+            memory.record(session_id, "assistant", response_text, tier="voice")
+            await request_speak(response_text)
+            return _quick_response(response_text, session_id)
+
     # ── 3. Normal LLM chat flow ───────────────────────────────────────────────
     if req.force_tier:
         try:
@@ -657,7 +886,57 @@ async def chat(req: ChatRequest):
         decision = classify(req.prompt)
 
     recalled = memory.recall(req.prompt)
-    system   = "\n\n".join(filter(None, [req.system_prompt or "", recalled]))
+
+    # Language detection — inject Arabic system prompt when needed
+    try:
+        from core.language_detector import detect_language
+        _lang = detect_language(req.prompt)
+    except Exception:
+        _lang = "en"
+
+    # RAG — retrieve semantically relevant long-term memories
+    _rag_context = ""
+    try:
+        from memory.rag_memory import get_rag as _get_rag
+        _rag_memories = _get_rag().recall(req.prompt, n_results=3)
+        if _rag_memories and "No relevant" not in _rag_memories:
+            _rag_context = f"Relevant past context from long-term memory:\n{_rag_memories}"
+    except Exception as _rag_err:
+        print(f"[RAG] Recall failed: {_rag_err}")
+
+    # ChromaStore — domain-aware semantic memory retrieval
+    _chroma_context = ""
+    try:
+        from memory.chroma_store import get_store as _get_store
+        _chroma_hits = _get_store().retrieve_relevant(req.prompt, n=5)
+        if _chroma_hits:
+            _chroma_context = f"MEMORY CONTEXT (past relevant exchanges):\n{_chroma_hits}\n\nUse this context naturally."
+    except Exception as _cs_err:
+        print(f"[ChromaStore] Recall failed: {_cs_err}")
+
+    _base_system = req.system_prompt or ""
+
+    # Emotion state — inject behavioral modifier when non-neutral
+    _emotion_modifier = ""
+    try:
+        from emotion.voice_state import get_current_state as _get_emotion, get_analyzer as _get_ea
+        _emotion_state = _get_emotion()
+        if _emotion_state.get("state", "neutral") != "neutral":
+            _emotion_modifier = _get_ea().get_system_prompt_modifier(_emotion_state["state"])
+    except Exception:
+        pass
+
+    if _lang == "ar":
+        _ar_prompt = (
+            "The user is speaking Egyptian Arabic (عربي مصري). "
+            "Respond naturally in Egyptian Arabic dialect. "
+            "Use casual Egyptian expressions, not formal Modern Standard Arabic. "
+            "Keep responses concise and conversational."
+        )
+        system = "\n\n".join(filter(None, [_base_system, _emotion_modifier, _ar_prompt, recalled, _rag_context, _chroma_context]))
+    else:
+        system = "\n\n".join(filter(None, [_base_system, _emotion_modifier, recalled, _rag_context, _chroma_context]))
+
     history  = memory.get_context(session_id)
 
     response_text = await dispatch(
@@ -671,6 +950,45 @@ async def chat(req: ChatRequest):
     memory.record(session_id, "user",      req.prompt,    tier=decision.tier.value)
     memory.record(session_id, "assistant", response_text, tier=decision.tier.value)
 
+    # RAG — persist this exchange to long-term episodic memory (blocking, existing)
+    try:
+        from memory.rag_memory import get_rag as _get_rag
+        _get_rag().store_conversation(
+            user_msg=req.prompt,
+            jarvis_msg=response_text,
+            session_id=session_id,
+        )
+    except Exception as _rag_store_err:
+        print(f"[RAG] Store failed: {_rag_store_err}")
+
+    # ChromaStore — domain-aware background persist (non-blocking)
+    try:
+        from memory.chroma_store import store_memory_bg as _store_bg
+        _store_bg(req.prompt, response_text, {"session_id": session_id})
+    except Exception as _cs_store_err:
+        print(f"[ChromaStore] Store dispatch failed: {_cs_store_err}")
+
+    # PHANTOM ZERO — passive keyword detection (fire-and-forget, background)
+    def _phantom_keyword_scan(prompt: str) -> None:
+        try:
+            from phantom.phantom_os import get_phantom as _gp
+            _p = prompt.lower()
+            _ph = _gp()
+            if any(k in _p for k in ("trained", "training", "workout", "sparring", "ran ", "kickbox", "boxing", "gym")):
+                _ph.log_activity("combat", "workout", 1, notes="auto-detected from chat")
+            if any(k in _p for k in ("committed", "pushed", "deployed", "built", "compiled", "build")):
+                _ph.log_activity("engineering", "commit", 1, notes="auto-detected from chat")
+            if any(k in _p for k in ("chess", "played a game", "played chess", "game of chess")):
+                _ph.log_activity("strategy", "game", 1, notes="auto-detected from chat")
+            if any(k in _p for k in ("studied", "reading", "read for", "learned", "learning")):
+                _ph.log_activity("neuro", "study", 1, notes="auto-detected from chat")
+            if any(k in _p for k in ("taught", "teaching session", "prepared slides", "tutored", "explained to")):
+                _ph.log_activity("programming", "teaching_session", 1, notes="auto-detected from chat")
+        except Exception as _phe:
+            print(f"[PHANTOM] Keyword scan failed: {_phe}")
+    import threading as _threading
+    _threading.Thread(target=_phantom_keyword_scan, args=(req.prompt,), daemon=True).start()
+
     # Log interaction for adaptive learning (fire-and-forget, never blocks)
     asyncio.create_task(_log_interaction_bg(
         session_id, req.prompt, response_text,
@@ -681,7 +999,8 @@ async def chat(req: ChatRequest):
     asyncio.create_task(_check_feedback_bg(session_id, req.prompt))
 
     if session_id != "voice-pipeline":
-        await request_speak(response_text)
+        from core.text_sanitizer import sanitize_for_tts
+        await request_speak(sanitize_for_tts(response_text))
 
     return ChatResponse(
         response=response_text,
@@ -690,6 +1009,40 @@ async def chat(req: ChatRequest):
         tier_reason=decision.reason,
         confidence=decision.confidence,
     )
+
+
+# ── Watchdog alert endpoints ──────────────────────────────────────────────────
+
+class AlertRequest(BaseModel):
+    message:  str
+    severity: str = "info"   # info | warning | error | critical
+    source:   str = "watchdog"
+
+
+@app.post("/internal/alert", status_code=201)
+async def internal_alert(req: AlertRequest):
+    """Receive a watchdog alert, store it, and broadcast to all HUD clients."""
+    alert = {
+        "type":      "watchdog_alert",
+        "message":   req.message,
+        "severity":  req.severity,
+        "source":    req.source,
+        "timestamp": datetime.datetime.now().isoformat(),
+    }
+    _alert_store.append(alert)
+    # Broadcast to HUD WebSocket clients (fire-and-forget)
+    try:
+        from api.voice_bridge import broadcast_to_hud
+        asyncio.create_task(broadcast_to_hud(alert))
+    except Exception:
+        pass
+    return {"status": "stored", "alert": alert}
+
+
+@app.get("/internal/alerts")
+async def internal_alerts():
+    """Return the last 50 watchdog alerts."""
+    return {"alerts": list(_alert_store), "count": len(_alert_store)}
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────
@@ -1028,6 +1381,47 @@ async def _handle_diagnostic_voice() -> str:
 # GOOGLE CALENDAR HANDLER
 # ══════════════════════════════════════════════════════════════════════════════
 
+async def _handle_whatsapp_voice(prompt: str) -> str:
+    """Handle WhatsApp voice commands: send message or read messages."""
+    from sensors.whatsapp_sensor import whatsapp
+    lower = prompt.lower()
+
+    # ── Read messages ─────────────────────────────────────────────────────────
+    if any(kw in lower for kw in ("what are my messages", "any whatsapp", "read my messages",
+                                   "check messages", "whatsapp messages")):
+        status = await whatsapp.get_status()
+        if status.get("status") != "connected":
+            return "WhatsApp is not connected, sir. Please scan the QR code to link your device."
+        msgs = await whatsapp.poll_incoming(limit=10, unread_only=True)
+        if not msgs:
+            msgs = await whatsapp.poll_incoming(limit=3)
+        await whatsapp.mark_read([m.get("chat_id") for m in msgs])
+        return whatsapp.format_for_voice(msgs)
+
+    # ── Send message ─────────────────────────────────────────────────────────
+    import re as _re
+    # "message John hello there" / "send WhatsApp to John hello" / "send [name] [text]"
+    send_match = _re.search(
+        r'(?:message|send\s+(?:whatsapp\s+to|a\s+message\s+to|to))\s+(\w[\w\s]*?)\s+(.+)',
+        lower, _re.IGNORECASE
+    )
+    if send_match:
+        contact = send_match.group(1).strip()
+        text    = send_match.group(2).strip()
+        status = await whatsapp.get_status()
+        if status.get("status") != "connected":
+            return "WhatsApp is not connected, sir."
+        chat_id = await whatsapp.resolve_contact(contact)
+        if not chat_id:
+            return f"I couldn't find a contact named {contact}, sir."
+        result = await whatsapp.send_message(chat_id, text)
+        if "error" in result:
+            return f"Message failed to send, sir. {result['error']}"
+        return f"Message sent to {contact}, sir."
+
+    return "I'm not sure what you'd like to do with WhatsApp, sir. Try 'message [name] [text]' or 'what are my WhatsApp messages'."
+
+
 async def _handle_calendar_voice() -> str:
     """Return a TTS-safe summary of today's Google Calendar events."""
     try:
@@ -1233,7 +1627,7 @@ async def diagnostic():
     from agents.monitor_agent import monitor as _monitor_agent
     _all_agents = agent_dispatcher.get_all()  # list[dict]
     agents_status: dict[str, str] = {}
-    for name in ("research", "code", "file", "monitor", "autogui", "vision"):
+    for name in ("research", "code", "file", "monitor", "autogui"):
         try:
             if name == "monitor":
                 agents_status[name] = "running" if _monitor_agent._running else "idle"
@@ -1245,6 +1639,17 @@ async def diagnostic():
                 agents_status[name] = "running" if running else "idle"
         except Exception:
             agents_status[name] = "idle"
+
+    # Vision — check Ollama for LLaVA
+    try:
+        import httpx as _hx
+        async with _hx.AsyncClient(timeout=3.0) as _hc:
+            _tr = await _hc.get("http://localhost:11434/api/tags")
+            _models = _tr.json().get("models", [])
+            _llava_loaded = any("llava" in m.get("name", "") for m in _models)
+            agents_status["vision"] = "active" if _llava_loaded else "idle"
+    except Exception:
+        agents_status["vision"] = "unavailable"
 
     # Sensors (vault key presence + github live check)
     from api.weather_calendar import _github_last_ok
@@ -1299,3 +1704,56 @@ async def diagnostic():
         "uptime":  uptime,
         "version": "3.3.0",
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MORNING BRIEFING ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/briefing/run")
+async def briefing_run():
+    """Always runs a fresh briefing — never reads from cache.
+    (The date guard lives only in auto_run_if_new_day, not here.)"""
+    from briefing.morning_briefing import run_briefing  # no date check
+    try:
+        result = await run_briefing()
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Briefing failed: {e}")
+
+
+@app.get("/debug/env")
+async def debug_env():
+    import os
+    key = os.getenv("GROQ_API_KEY", "")
+    return {
+        "groq_key_present": bool(key),
+        "groq_key_prefix": key[:8] if key else "empty"
+    }
+
+
+@app.get("/briefing/last")
+async def briefing_last():
+    """Return the last briefing result from data/briefing_last_run.json."""
+    from briefing.morning_briefing import _LAST_RUN
+    if not _LAST_RUN.exists():
+        return {"status": "no briefing run yet", "spoken": None, "timestamp": None}
+    try:
+        return json.loads(_LAST_RUN.read_text())
+    except Exception as e:
+        raise HTTPException(500, f"Could not read last briefing: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TTS STATUS ENDPOINT
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/tts/status")
+async def tts_status():
+    """Return active TTS engine status."""
+    try:
+        from api.voice_bridge import _voice_ws
+        kokoro_ready = _voice_ws is not None
+        return {"tier": "kokoro", "kokoro_ready": kokoro_ready}
+    except Exception as e:
+        return {"tier": "unknown", "kokoro_ready": False, "error": str(e)}

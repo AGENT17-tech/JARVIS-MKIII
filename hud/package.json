@@ -7,11 +7,13 @@
     "dev": "vite",
     "electron": "electron .",
     "start": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "start:prod": "NODE_ENV=production electron .",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "d3": "^7.9.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "systeminformation": "^5.31.4",

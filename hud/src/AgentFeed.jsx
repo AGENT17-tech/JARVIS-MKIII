@@ -63,32 +63,11 @@ const AGENT_COLOR = {
 }
 
 export default function AgentFeed() {
-  // ── Pipeline simulation ────────────────────────────────────────────────────
-  const [pipelineStates, setPipelineStates] = useState(
+  // ── Pipeline — static idle; activity driven by real agent events via WS ───
+  const [pipelineStates] = useState(
     PIPELINE_AGENTS.map(a => ({ ...a, status: 'idle', activity: 'Idle' }))
   )
   const [log, setLog] = useState([])
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      const idx      = Math.floor(Math.random() * PIPELINE_AGENTS.length)
-      const activity = ACTIVITIES[Math.floor(Math.random() * ACTIVITIES.length)]
-      const isActive = activity !== 'Idle'
-      setPipelineStates(prev => prev.map((a, i) =>
-        i === idx ? { ...a, status: isActive ? 'active' : 'idle', activity } : a
-      ))
-      if (isActive) {
-        setLog(prev => [{
-          id:    Date.now(),
-          agent: PIPELINE_AGENTS[idx].id,
-          color: PIPELINE_AGENTS[idx].color,
-          text:  activity,
-          time:  new Date().toLocaleTimeString('en-US', { hour12: false }),
-        }, ...prev].slice(0, 8))
-      }
-    }, 1800)
-    return () => clearInterval(id)
-  }, [])
 
   // ── Operative agents (real — from /ws/agents) ──────────────────────────────
   const [agents,    setAgents]    = useState([])    // {agent_id, name, status, task, result, summary, elapsed, timestamp, severity}
@@ -170,7 +149,7 @@ export default function AgentFeed() {
         })
         .catch(() => {})
     }
-    const pollTimer = setInterval(poll, 5000)
+    const pollTimer = setInterval(poll, 30000)
 
     connect()
     return () => {

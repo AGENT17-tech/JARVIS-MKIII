@@ -1,4 +1,14 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
+
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('disable-gpu-sandbox')
+  app.commandLine.appendSwitch('no-sandbox')
+  app.commandLine.appendSwitch('disable-dev-shm-usage')
+  app.commandLine.appendSwitch('disable-setuid-sandbox')
+  app.commandLine.appendSwitch('in-process-gpu')
+  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512')
+}
+
 const path = require('path')
 const si = require('systeminformation')
 
@@ -15,11 +25,18 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: false,
+      backgroundThrottling: true,
+      offscreen: false
     }
   })
 
-  mainWindow.loadURL('http://localhost:5173')
+  if (process.env.NODE_ENV === 'production') {
+    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
+  } else {
+    mainWindow.loadURL('http://localhost:5173')
+  }
   mainWindow.setIgnoreMouseEvents(false)
 
   mainWindow.on('closed', () => {
@@ -37,16 +54,28 @@ function createWindow() {
         si.cpuTemperature()
       ])
       if (!mainWindow || mainWindow.isDestroyed()) return
-      mainWindow.webContents.send('system-stats', {
+      try { mainWindow.webContents.send('system-stats', {
         cpu: Math.round(cpu.currentLoad),
         ram: Math.round((mem.used / mem.total) * 100),
         temp: Math.round(temp.main) || 0
-      })
+      }) } catch (_) {}
     } catch (_) {}
-  }, 2000)
+  }, 3000)
 }
 
 app.whenReady().then(createWindow)
+
+app.on('browser-window-blur', () => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('window-blur')
+  } catch (_) {}
+})
+
+app.on('browser-window-focus', () => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('window-focus')
+  } catch (_) {}
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

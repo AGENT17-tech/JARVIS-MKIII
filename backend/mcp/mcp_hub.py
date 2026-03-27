@@ -229,7 +229,7 @@ async def web_fetch(url: str, max_chars: int = 3000) -> str:
     """
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True,
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, verify=False,
                                      headers={"User-Agent": "JARVIS-MKIII/3.3"}) as client:
             resp = await client.get(url)
             resp.raise_for_status()

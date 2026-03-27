@@ -1,0 +1,16 @@
+[Unit]
+Description=JARVIS WhatsApp Bridge
+After=network.target jarvis-backend.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/k/JARVIS-MKIII/whatsapp
+ExecStart=/usr/bin/node whatsapp_bridge.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target
