@@ -28,3 +28,8 @@ hud/out/
 data/
 __pycache__/
 *.pyc
+backend/config/token.json
+backend/config/token.pickle
+backend/config/credentials.json
+whatsapp/node_modules/
+whatsapp/rate_limited.json
