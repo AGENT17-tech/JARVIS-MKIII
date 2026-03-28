@@ -20,3 +20,11 @@ logs/
 .DS_Store
 backend/config/credentials.json
 backend/config/token.pickle
+venv/
+.venv/
+hud/node_modules/
+hud/dist/
+hud/out/
+data/
+__pycache__/
+*.pyc
