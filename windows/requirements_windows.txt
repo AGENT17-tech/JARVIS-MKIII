@@ -13,6 +13,7 @@ screen-brightness-control
 
 # ── Cross-platform deps (same as requirements.txt minus python-xlib) ──────────
 fastapi>=0.115.0
+python-multipart>=0.0.9
 uvicorn[standard]>=0.32.0
 websockets>=13.0
 pydantic>=2.9.0
