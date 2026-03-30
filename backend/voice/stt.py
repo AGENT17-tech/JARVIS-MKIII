@@ -44,6 +44,16 @@ class STTEngine:
 
         self._vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
 
+        # CUDA warm-up — pre-compile kernels so first real query is fast
+        print("[STT] Running CUDA warm-up...")
+        try:
+            dummy = np.zeros(16000, dtype=np.float32)  # 1 second of silence
+            segments, _ = self._model.transcribe(dummy, language="en")
+            list(segments)  # consume generator to trigger actual inference
+            print("[STT] CUDA warm-up complete.")
+        except Exception as e:
+            print(f"[STT] Warm-up skipped: {e}")
+
     def start(self) -> None:
         self._running = True
         threading.Thread(target=self._capture_loop, daemon=True).start()
