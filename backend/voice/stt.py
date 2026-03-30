@@ -11,6 +11,15 @@ import webrtcvad
 import sounddevice as sd
 from faster_whisper import WhisperModel
 
+if platform.system() == "Windows":
+    try:
+        from groq import Groq as _GroqClient
+        GROQ_STT_AVAILABLE = True
+    except ImportError:
+        GROQ_STT_AVAILABLE = False
+else:
+    GROQ_STT_AVAILABLE = False
+
 SAMPLE_RATE        = 16000   # Whisper native rate
 CAPTURE_RATE       = 48000   # ALSA capture rate (hardware-supported); downsampled to SAMPLE_RATE
 CHANNELS           = 1
@@ -34,14 +43,18 @@ class STTEngine:
         self._running      = False
         self._audio_q: queue.Queue[bytes] = queue.Queue()
 
-        print(f"[STT] Loading faster-whisper {WHISPER_MODEL} (CUDA)...")
-        try:
-            self._model = WhisperModel(WHISPER_MODEL, device="cuda", compute_type="float16")
-            print("[STT] CUDA loaded.")
-        except Exception as e:
-            print(f"[STT] CUDA failed ({e}), falling back to CPU...")
-            self._model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-            print("[STT] CPU fallback loaded.")
+        if platform.system() != "Windows" or not GROQ_STT_AVAILABLE:
+            print(f"[STT] Loading faster-whisper {WHISPER_MODEL} (CUDA)...")
+            try:
+                self._model = WhisperModel(WHISPER_MODEL, device="cuda", compute_type="float16")
+                print("[STT] CUDA loaded.")
+            except Exception as e:
+                print(f"[STT] CUDA failed ({e}), falling back to CPU...")
+                self._model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+                print("[STT] CPU fallback loaded.")
+        else:
+            self._model = None
+            print("[STT] Windows mode — using Groq Whisper API (no local model loaded).")
 
         self._vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
 
@@ -85,10 +98,59 @@ class STTEngine:
                 speech_frames.append(frame)
                 if silence_count >= SILENCE_THRESHOLD:
                     if len(speech_frames) >= MIN_SPEECH_FRAMES:
-                        self._transcribe(speech_frames)
+                        if GROQ_STT_AVAILABLE and platform.system() == "Windows":
+                            self._transcribe_groq(speech_frames)
+                        else:
+                            self._transcribe(speech_frames)
                     speech_frames = []
                     silence_count = 0
                     in_speech     = False
+
+    def _transcribe_groq(self, frames: list[bytes]) -> None:
+        import io, wave, tempfile, os
+        from core.vault import Vault
+        try:
+            # Write frames to a temp WAV file
+            pcm = b"".join(frames)
+            tmp_path = os.path.join(tempfile.gettempdir(), "jarvis_stt_groq.wav")
+            with wave.open(tmp_path, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)  # int16
+                wf.setframerate(SAMPLE_RATE)
+                wf.writeframes(pcm)
+
+            # Call Groq Whisper API
+            vault = Vault()
+            api_key = vault.get("GROQ_API_KEY")
+            client = _GroqClient(api_key=api_key)
+
+            with open(tmp_path, "rb") as audio_file:
+                transcription = client.audio.transcriptions.create(
+                    file=("audio.wav", audio_file.read()),
+                    model="whisper-large-v3-turbo",
+                    language=self.language,
+                    response_format="text",
+                )
+
+            text = transcription.strip() if isinstance(transcription, str) else transcription.text.strip()
+
+            if len(text) < MIN_TRANSCRIPT_LEN:
+                return
+            if re.fullmatch(r"[\W\d\s]+", text):
+                return
+
+            print(f"[STT] Transcript (Groq): {text}")
+            try:
+                from integrations.touchdesigner_bridge import on_listening_stop
+                on_listening_stop()
+            except Exception:
+                pass
+            self.on_transcript(text)
+
+        except Exception as e:
+            print(f"[STT] Groq transcription failed: {e}")
+            # Fall back to local whisper
+            self._transcribe(frames)
 
     def _transcribe(self, frames: list[bytes]) -> None:
         pcm   = b"".join(frames)
