@@ -9,7 +9,7 @@ Flow:
 """
 
 from __future__ import annotations
-import asyncio, threading, httpx, websockets, json, datetime, time, signal, re
+import asyncio, platform, threading, httpx, websockets, json, datetime, time, signal, re
 from voice.stt import STTEngine
 from voice.news import get_morning_briefing
 from voice.tts import TTSEngine
@@ -106,14 +106,20 @@ class VoiceOrchestrator:
     def _on_speaking_start(self) -> None:
         self._is_speaking = True
         self._send_hud("speaking:start")
+        # Pause STT processing during speech to prevent mic bleed
+        if hasattr(self._stt, "_speaking_guard"):
+            self._stt._speaking_guard = True
 
     def _on_speaking_stop(self) -> None:
         self._send_hud("speaking:stop")
         self._is_speaking = False
-        # 0.5 s cooldown — let the mic settle before re-opening STT
-        threading.Timer(0.5, self._resume_listening).start()
+        # Wait after TTS stops before accepting new STT input — longer on Windows for mic bleed
+        cooldown = 1.5 if platform.system() == "Windows" else 0.5
+        threading.Timer(cooldown, self._resume_listening).start()
 
     def _resume_listening(self) -> None:
+        if hasattr(self._stt, "_speaking_guard"):
+            self._stt._speaking_guard = False
         self._busy = False
         self._send_hud("voice:listening")
 

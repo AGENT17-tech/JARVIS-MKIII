@@ -57,6 +57,7 @@ class STTEngine:
             print("[STT] Windows mode — using Groq Whisper API (no local model loaded).")
 
         self._vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
+        self._speaking_guard = False
 
     def start(self) -> None:
         self._running = True
@@ -84,6 +85,13 @@ class STTEngine:
         silence_count = 0
         in_speech     = False
         while self._running:
+            if getattr(self, "_speaking_guard", False):
+                # Drain the queue without processing — discard mic bleed during TTS
+                try:
+                    self._audio_q.get_nowait()
+                except Exception:
+                    pass
+                continue
             try:
                 frame = self._audio_q.get(timeout=0.5)
             except queue.Empty:
@@ -137,6 +145,19 @@ class STTEngine:
             if len(text) < MIN_TRANSCRIPT_LEN:
                 return
             if re.fullmatch(r"[\W\d\s]+", text):
+                return
+
+            word_count = len(text.split())
+            if word_count < 2:
+                print(f"[STT] Skipped short transcript: {text}")
+                return
+
+            FALSE_POSITIVES = {
+                "thank you", "thanks", "okay", "ok", "yeah", "yes", "no",
+                "hmm", "uh", "um", "conferere",
+            }
+            if text.lower().strip().rstrip(".!?,") in FALSE_POSITIVES:
+                print(f"[STT] Filtered false positive: {text}")
                 return
 
             print(f"[STT] Transcript (Groq): {text}")
