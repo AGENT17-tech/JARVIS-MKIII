@@ -52,6 +52,7 @@ export default function LifeOSTab() {
   const [tunnelChecked, setTunnelChecked] = useState(false)
   const [phantomScores, setPhantomScores] = useState(null)
   const [phantomPriority, setPhantomPriority] = useState('')
+  const [phantomMonthly, setPhantomMonthly] = useState(null)
 
   useEffect(() => {
     setLoading(true)
@@ -108,9 +109,17 @@ export default function LifeOSTab() {
         .then(d => setPhantomPriority(d.recommendation || ''))
         .catch(() => {})
     }
+    const fetchMonthly = () => {
+      fetch(`${API}/phantom/monthly`)
+        .then(r => r.json())
+        .then(d => setPhantomMonthly(d))
+        .catch(() => {})
+    }
     fetchPhantom()
-    const id = setInterval(fetchPhantom, 60000)
-    return () => clearInterval(id)
+    fetchMonthly()
+    const id1 = setInterval(fetchPhantom, 60000)
+    const id2 = setInterval(fetchMonthly, 3600000)
+    return () => { clearInterval(id1); clearInterval(id2) }
   }, [])
 
   const copyTunnelUrl = () => {
@@ -246,15 +255,28 @@ export default function LifeOSTab() {
             {phantomScores ? (
               <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                 {PHANTOM_DOMAINS.map(d => {
-                  const info  = phantomScores[d.key] || {}
-                  const score = info.score ?? 25
-                  const pct   = Math.min(100, score)
-                  const tPct  = d.target
+                  const info    = phantomScores[d.key] || {}
+                  const score   = info.score ?? 25
+                  const pct     = Math.min(100, score)
+                  const tPct    = d.target
+                  const mInfo   = phantomMonthly?.domains?.[d.key]
+                  const trend   = mInfo?.trend ?? 'stable'
+                  const avg30   = mInfo?.avg ?? null
+                  const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'
+                  const trendColor = trend === 'up' ? '#00ff88' : trend === 'down' ? '#ff3344' : 'rgba(160,215,255,0.4)'
                   return (
                     <div key={d.key}>
                       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:3 }}>
                         <span style={{ fontFamily:'Orbitron', fontSize:8, letterSpacing:2, color:'rgba(160,215,255,0.7)' }}>{d.label}</span>
-                        <span style={{ fontFamily:'Orbitron', fontSize:18, fontWeight:700, color:d.color, lineHeight:1 }}>{score}</span>
+                        <div style={{ display:'flex', alignItems:'baseline', gap:6 }}>
+                          {avg30 !== null && (
+                            <span style={{ fontFamily:'Share Tech Mono', fontSize:8, color:'rgba(160,215,255,0.4)' }}>
+                              30d·{avg30}
+                            </span>
+                          )}
+                          <span style={{ fontFamily:'Orbitron', fontSize:11, fontWeight:700, color:trendColor }}>{trendIcon}</span>
+                          <span style={{ fontFamily:'Orbitron', fontSize:18, fontWeight:700, color:d.color, lineHeight:1 }}>{score}</span>
+                        </div>
                       </div>
                       <div style={{ position:'relative', height:3, background:'rgba(0,212,255,0.1)', borderRadius:2, overflow:'visible' }}>
                         <div style={{ height:'100%', width:`${pct}%`, background:d.color, boxShadow:`0 0 6px ${d.color}88`, borderRadius:2, transition:'width 0.6s ease' }}/>

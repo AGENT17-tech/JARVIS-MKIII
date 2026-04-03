@@ -151,5 +151,14 @@ class HindsightMemory:
     def init_session(self, session_id: str) -> None:
         self.long.register_session(session_id)
 
+    def get_session_interactions(self, session_id: str, limit: int = 50) -> list[dict]:
+        """Return the last `limit` messages for a session in API format."""
+        msgs = self.short.get(session_id)[-limit:]
+        return [{"role": m.role, "content": m.content} for m in msgs]
+
+    def get_active_sessions(self) -> list[str]:
+        """Return all session IDs that have at least one message in short-term memory."""
+        return list(self.short._sessions.keys())
+
 
 memory = HindsightMemory()

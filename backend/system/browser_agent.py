@@ -88,9 +88,14 @@ def _selenium_fetch_sync(url: str) -> str:
     """Fetch raw HTML via Selenium headless Chromium. Returns HTML string."""
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
+    from selenium.common.exceptions import TimeoutException, WebDriverException
+    from webdriver_manager.chrome import ChromeDriverManager
+    from selenium.webdriver.chrome.service import Service
+    from config.settings import BROWSER_CFG
 
     opts = Options()
-    opts.add_argument("--headless=new")
+    if BROWSER_CFG.headless:
+        opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
@@ -99,12 +104,21 @@ def _selenium_fetch_sync(url: str) -> str:
         "user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
-    driver = webdriver.Chrome(options=opts)
+    service = Service(ChromeDriverManager().install())
+    driver  = webdriver.Chrome(service=service, options=opts)
     try:
-        driver.set_page_load_timeout(25)
+        driver.set_page_load_timeout(BROWSER_CFG.page_load_timeout_s)
+        driver.implicitly_wait(BROWSER_CFG.implicit_wait_s)
+        logger.info("[BROWSER] Selenium fetching: %s", url)
         driver.get(url)
-        time.sleep(2)  # allow JS to settle
+        time.sleep(1)  # allow JS to settle
         return driver.page_source
+    except TimeoutException:
+        logger.warning("[BROWSER] Selenium page load timed out for %s", url)
+        raise
+    except WebDriverException as exc:
+        logger.warning("[BROWSER] Selenium WebDriver error for %s: %s", url, exc)
+        raise
     finally:
         driver.quit()
 
@@ -118,7 +132,11 @@ class BrowserAgent:
         self._pw       = None
         self._browser  = None
         self._page     = None
-        self._headless = True
+        try:
+            from config.settings import BROWSER_CFG
+            self._headless = BROWSER_CFG.headless
+        except Exception:
+            self._headless = True
         self._lock     = asyncio.Lock()
 
     # ── Playwright init ───────────────────────────────────────────────────────

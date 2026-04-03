@@ -2,8 +2,6 @@
 JARVIS-MKIII — voice_orchestrator.py
 Central nerve of the voice pipeline.
 
-
-logger = logging.getLogger(__name__)
 Flow:
   Mic → STT → VoiceOrchestrator → POST /chat → TTS → Speaker
                                 ↓
@@ -18,6 +16,8 @@ from voice.tts import TTSEngine
 from voice.wake_word import WakeWordDetector
 from core.dispatcher import RateLimitFiller
 import logging
+
+logger = logging.getLogger(__name__)
 
 API_BASE   = "http://localhost:8000"
 SESSION_ID = "voice-pipeline"
@@ -40,6 +40,10 @@ def _time_greeting() -> str:
     else:           return "Good evening"
 
 
+CONFIRM_PHRASES = {"yes", "yeah", "correct", "confirm", "that's right", "affirmative", "yep"}
+DENY_PHRASES    = {"no", "nope", "wrong", "cancel", "that's wrong", "negative", "nevermind"}
+
+
 class VoiceOrchestrator:
     def __init__(self):
         self._tts        = TTSEngine(on_start=self._on_speaking_start, on_stop=self._on_speaking_stop)
@@ -49,6 +53,9 @@ class VoiceOrchestrator:
         self._loop       = asyncio.new_event_loop()
         self._busy       = False
         self._is_speaking = False   # echo guard flag
+        # Confidence gate state
+        self._awaiting_confirmation: str | None = None
+        self._confirm_timer: threading.Timer | None = None
 
     def start(self) -> None:
         logger.info("[VOICE] Starting voice pipeline...")
@@ -89,7 +96,7 @@ class VoiceOrchestrator:
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
-    def _on_transcript(self, text: str) -> None:
+    def _on_transcript(self, text: str, confidence: float = 0.9) -> None:
         # Echo guard: discard anything captured while JARVIS is speaking
         if self._is_speaking:
             logger.debug(f"[STT] Echo discarded (speaking): {text[:60]}")
@@ -97,8 +104,30 @@ class VoiceOrchestrator:
         if any(p in text.lower() for p in SELF_PHRASES):
             logger.info(f"[VOICE] Ignored self-phrase: {text[:50]}")
             return
+
+        # Confirmation-gate response path
+        if self._awaiting_confirmation is not None:
+            self._handle_confirmation(text)
+            return
+
         if self._busy:
             return
+
+        # Confidence gate — ask for confirmation if below threshold
+        try:
+            from config.settings import STT_CFG
+            if STT_CFG.confirmation_enabled and confidence < STT_CFG.confidence_threshold:
+                logger.info(f"[STT] Low confidence ({confidence:.2f}) — asking for confirmation: {text[:60]}")
+                self._awaiting_confirmation = text
+                self._busy = True
+                self._tts.speak(f"Did you say: {text}?")
+                timeout = STT_CFG.max_confirmation_wait_s
+                self._confirm_timer = threading.Timer(timeout, self._confirmation_timeout)
+                self._confirm_timer.start()
+                return
+        except Exception:
+            pass
+
         self._busy = True
         self._send_hud(f"voice:transcript:{text}")
         self._send_hud("voice:processing")
@@ -106,6 +135,33 @@ class VoiceOrchestrator:
             target=lambda: asyncio.run(self._query_mkiii(text)),
             daemon=True,
         ).start()
+
+    def _handle_confirmation(self, response: str) -> None:
+        normalized = response.lower().strip().rstrip(".!?,")
+        if self._confirm_timer:
+            self._confirm_timer.cancel()
+            self._confirm_timer = None
+        confirmed_text = self._awaiting_confirmation
+        self._awaiting_confirmation = None
+
+        if any(p in normalized for p in CONFIRM_PHRASES):
+            logger.info(f"[STT] Confirmation received — processing: {confirmed_text[:60]}")
+            self._send_hud(f"voice:transcript:{confirmed_text}")
+            self._send_hud("voice:processing")
+            threading.Thread(
+                target=lambda: asyncio.run(self._query_mkiii(confirmed_text)),
+                daemon=True,
+            ).start()
+        else:
+            logger.info(f"[STT] Transcript denied — discarding: {confirmed_text[:60]}")
+            self._tts.speak("Understood, disregarding.")
+            self._busy = False
+
+    def _confirmation_timeout(self) -> None:
+        if self._awaiting_confirmation is not None:
+            logger.info(f"[STT] Confirmation timeout — discarding: {self._awaiting_confirmation[:60]}")
+            self._awaiting_confirmation = None
+            self._busy = False
 
     def _on_speaking_start(self) -> None:
         self._is_speaking = True

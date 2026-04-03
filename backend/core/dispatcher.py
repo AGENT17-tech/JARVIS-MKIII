@@ -6,7 +6,7 @@ Routes requests to the correct model:
 """
 
 from __future__ import annotations
-import asyncio, os, httpx
+import asyncio, os, re, httpx
 from core.vault import Vault
 from core.router import TaskTier
 from config.settings import MODEL_CFG
@@ -48,6 +48,23 @@ async def dispatch(
     if tier == TaskTier.LOCAL:
         return await _call_local(messages, system)
 
+    if tier == TaskTier.COMPLEX:
+        # If the prompt implies tool use, run the ReAct loop; otherwise call Claude directly
+        _TOOL_INTENT = re.compile(
+            r"\b(search|fetch|read|write|run|execute|browse|look up|calculate|open|check)\b",
+            re.IGNORECASE,
+        )
+        if _TOOL_INTENT.search(prompt):
+            from core.react_loop import react
+            from tools.sandbox import sandbox
+
+            async def _groq_llm(msgs: list[dict]) -> str:
+                return await _call_groq(msgs, system)
+
+            logger.info("[DISPATCHER] COMPLEX + tool intent — running ReAct loop")
+            return await react(prompt, tools=sandbox, llm_call=_groq_llm)
+        return await _call_claude(messages, system)
+
     return await _call_groq(messages, system)
 
 
@@ -84,6 +101,27 @@ async def _call_groq(messages: list[dict], system: str) -> str:
                 await asyncio.sleep(wait)
             else:
                 raise RateLimitFiller("Groq rate limit — all retries exhausted")
+
+
+async def _call_claude(messages: list[dict], system: str) -> str:
+    from config.settings import ANTHROPIC_API_KEY, MODEL_CFG
+    if not ANTHROPIC_API_KEY:
+        logger.info("[DISPATCHER] ANTHROPIC_API_KEY not set — falling back to Groq for COMPLEX tier")
+        return await _call_groq(messages, system)
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        logger.info("[DISPATCHER] Routing to Claude %s (COMPLEX tier)", MODEL_CFG.complex_model)
+        resp = client.messages.create(
+            model=MODEL_CFG.complex_model,
+            max_tokens=1024,
+            system=system,
+            messages=messages,
+        )
+        return resp.content[0].text
+    except Exception as exc:
+        logger.warning("[DISPATCHER] Claude call failed (%s) — falling back to Groq", exc)
+        return await _call_groq(messages, system)
 
 
 # LOCAL tier routes to LLaVA for vision tasks only

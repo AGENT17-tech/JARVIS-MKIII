@@ -64,3 +64,9 @@ async def phantom_brief():
 async def phantom_priority():
     from phantom.phantom_os import get_phantom
     return {"recommendation": get_phantom().get_priority_recommendation()}
+
+
+@phantom_router.get("/monthly")
+async def phantom_monthly():
+    from phantom.phantom_os import get_phantom
+    return get_phantom().get_monthly_summary()

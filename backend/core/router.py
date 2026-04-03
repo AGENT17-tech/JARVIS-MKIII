@@ -8,6 +8,7 @@ class TaskTier(str, Enum):
     VOICE     = "voice"    # Groq — fast, smart, free
     REASONING = "reasoning" # Groq — same model, flagged for deep tasks
     LOCAL     = "local"    # Ollama — sensitive/offline only
+    COMPLEX   = "complex"  # Claude Haiku — long/multi-step reasoning
 
 
 @dataclass
@@ -37,6 +38,22 @@ def classify(prompt: str) -> RoutingDecision:
             reason="Sensitive operation — local only",
             confidence=0.95,
         )
+
+    # Complex routing — check word count and keyword list from settings
+    try:
+        from config.settings import MODEL_CFG
+        if MODEL_CFG.complex_routing_enabled:
+            word_count = len(prompt.split())
+            kw_hit     = any(kw.lower() in prompt.lower() for kw in MODEL_CFG.complex_keywords)
+            if word_count >= MODEL_CFG.complex_threshold_words or kw_hit:
+                return RoutingDecision(
+                    tier=TaskTier.COMPLEX,
+                    reason="Long/complex prompt — routing to Claude",
+                    confidence=0.88,
+                )
+    except Exception:
+        pass
+
     if _REASONING_RE.search(prompt) or len(prompt.split()) > 30:
         return RoutingDecision(
             tier=TaskTier.REASONING,

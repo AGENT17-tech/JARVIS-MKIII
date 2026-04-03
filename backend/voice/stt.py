@@ -163,13 +163,22 @@ class STTEngine:
                 logger.info(f"[STT] Filtered false positive: {text}")
                 return
 
-            logger.debug(f"[STT] Transcript (Groq): {text}")
+            # Heuristic confidence for Groq (no logprob available)
+            words = text.split()
+            if len(words) < 3:
+                confidence = 0.4
+            elif text.lower().strip().rstrip(".!?,") in {"uh", "um", "hmm", "yeah", "okay"}:
+                confidence = 0.3
+            else:
+                confidence = 0.9
+
+            logger.debug(f"[STT] Transcript (Groq): {text} [conf={confidence:.2f}]")
             try:
                 from integrations.touchdesigner_bridge import on_listening_stop
                 on_listening_stop()
             except Exception:
                 pass
-            self.on_transcript(text)
+            self.on_transcript(text, confidence)
 
         except Exception as e:
             logger.error(f"[STT] Groq transcription failed: {e}")
@@ -206,7 +215,7 @@ class STTEngine:
         except Exception as _se:
             logger.error(f"[EMOTION] Save failed: {_se}")
 
-        segments, info = self._model.transcribe(
+        raw_segments, info = self._model.transcribe(
             audio,
             language=self.language,
             beam_size=5,
@@ -218,7 +227,8 @@ class STTEngine:
                 "threshold":              0.6,
             },
         )
-        text = " ".join(s.text.strip() for s in segments).strip()
+        seg_list = list(raw_segments)  # materialise generator once
+        text     = " ".join(s.text.strip() for s in seg_list).strip()
 
         # Skip noise artifacts and low-confidence detections
         if len(text) < MIN_TRANSCRIPT_LEN:
@@ -229,10 +239,17 @@ class STTEngine:
             logger.info(f"[STT] Low lang confidence ({info.language_probability:.2f}) — skipped: {text[:40]}")
             return
 
-        logger.debug(f"[STT] Transcript: {text}")
+        # Derive confidence from avg_logprob of segments (already materialised)
+        if seg_list:
+            avg_logprob = sum(s.avg_logprob for s in seg_list) / len(seg_list)
+            confidence  = min(1.0, max(0.0, avg_logprob + 1.0))
+        else:
+            confidence = 0.9
+
+        logger.debug(f"[STT] Transcript: {text} [conf={confidence:.2f}]")
         try:
             from integrations.touchdesigner_bridge import on_listening_stop
             on_listening_stop()
         except Exception:
             pass
-        self.on_transcript(text)
+        self.on_transcript(text, confidence)

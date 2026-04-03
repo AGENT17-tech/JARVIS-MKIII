@@ -2,13 +2,16 @@
 JARVIS-MKIII — api/routers/memory.py
 Domain-aware memory endpoints backed by ChromaStore.
 
-  GET  /memory/stats             → total count, per-domain breakdown, timestamps
-  GET  /memory/search?q=..&n=.. → semantic search (optional domain filter)
-  DELETE /memory/clear?confirm=true → wipe jarvis_memory collection
+  GET  /memory/stats                   → total count, per-domain breakdown, timestamps
+  GET  /memory/search?q=..&n=..        → semantic search (optional domain filter)
+  POST /memory/prune                   → delete entries older than RETENTION_DAYS
+  POST /memory/summarize-session       → summarize a session and store in ChromaDB
+  DELETE /memory/clear?confirm=true    → wipe jarvis_memory collection
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from typing import Optional
 
 memory_router = APIRouter(prefix="/memory", tags=["memory"])
@@ -52,6 +55,32 @@ async def memory_prune():
         from memory.prune import prune_old_memories, RETENTION_DAYS
         deleted = prune_old_memories(get_store()._col)
         return {"deleted": deleted, "retention_days": RETENTION_DAYS}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class _SummarizeRequest(BaseModel):
+    session_id: str
+    force:      bool = False
+
+
+@memory_router.post("/summarize-session")
+async def summarize_session_endpoint(body: _SummarizeRequest):
+    """Summarize a session's conversation and store the digest in ChromaDB."""
+    try:
+        from memory.hindsight import memory
+        from memory.session_summarizer import summarize_session, store_session_summary
+
+        interactions = memory.get_session_interactions(body.session_id, limit=50)
+        summary = await summarize_session(body.session_id, interactions, force=body.force)
+        if summary is None:
+            return {
+                "status": "skipped",
+                "reason": f"Session has fewer than 10 interactions (use force=true to override)",
+                "interaction_count": len(interactions),
+            }
+        store_session_summary(body.session_id, summary)
+        return {"status": "stored", "session_id": body.session_id, "summary": summary}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

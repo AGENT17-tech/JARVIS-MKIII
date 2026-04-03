@@ -183,6 +183,69 @@ class PhantomOS:
             trend[d] = {domain: self._compute_score(domain, d) for domain in DOMAINS}
         return trend
 
+    def get_30d_trend(self) -> dict:
+        """Return last 30 days of scores per domain. Keys are ISO date strings."""
+        trend: dict[str, dict] = {}
+        today = date.today()
+        for offset in range(29, -1, -1):
+            d = (today - timedelta(days=offset)).isoformat()
+            trend[d] = {domain: self._compute_score(domain, d) for domain in DOMAINS}
+        return trend
+
+    def get_monthly_summary(self) -> dict:
+        """
+        Aggregate statistics for the last 30 days:
+          per-domain avg, peak_day, lowest_day, trend (up/down/stable).
+        Trend is computed by comparing the last-7d average vs days 8–30 average;
+        a shift of ±5 points is the threshold for up/down.
+        """
+        today = date.today()
+        dates_30 = [(today - timedelta(days=i)).isoformat() for i in range(29, -1, -1)]
+        dates_recent = dates_30[-7:]   # last 7 days
+        dates_older  = dates_30[:23]   # days 8–30
+
+        summary: dict[str, dict] = {}
+        overall_totals: list[float] = []
+
+        for domain in DOMAINS:
+            scores_30 = {d: self._compute_score(domain, d) for d in dates_30}
+            avg_30     = sum(scores_30.values()) / len(scores_30)
+            peak_day   = max(scores_30, key=lambda d: scores_30[d])
+            lowest_day = min(scores_30, key=lambda d: scores_30[d])
+
+            avg_recent = sum(scores_30[d] for d in dates_recent) / len(dates_recent)
+            avg_older  = sum(scores_30[d] for d in dates_older) / len(dates_older) if dates_older else avg_recent
+            delta = avg_recent - avg_older
+            if delta >= 5:
+                trend_dir = "up"
+            elif delta <= -5:
+                trend_dir = "down"
+            else:
+                trend_dir = "stable"
+
+            summary[domain] = {
+                "avg":        round(avg_30, 1),
+                "peak_day":   peak_day,
+                "lowest_day": lowest_day,
+                "trend":      trend_dir,
+                "label":      DOMAINS[domain]["label"],
+                "color":      DOMAINS[domain]["color"],
+            }
+            overall_totals.append(avg_30)
+
+        overall_avg = round(sum(overall_totals) / len(overall_totals), 1)
+        best_domain    = max(summary, key=lambda d: summary[d]["avg"])
+        weakest_domain = min(summary, key=lambda d: summary[d]["avg"])
+
+        return {
+            "period":          "30d",
+            "domains":         summary,
+            "overall_avg":     overall_avg,
+            "best_domain":     best_domain,
+            "weakest_domain":  weakest_domain,
+            "generated_at":    datetime.now().isoformat(),
+        }
+
     def get_priority_recommendation(self) -> str:
         """Return a specific action for the domain furthest below its target."""
         today  = date.today().isoformat()

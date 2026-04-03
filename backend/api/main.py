@@ -145,7 +145,20 @@ async def lifespan(app: FastAPI):
     except Exception as _se:
         logger.warning("[SCHEDULER] APScheduler not available — prune job skipped: %s", _se)
     yield
-    # Shutdown
+    # Shutdown — summarize active sessions before exit
+    try:
+        from memory.session_summarizer import summarize_session, store_session_summary
+        active = memory.get_active_sessions()
+        if active:
+            logger.info("[SHUTDOWN] Summarizing %d active session(s)…", len(active))
+            async def _summarize_one(sid: str):
+                interactions = memory.get_session_interactions(sid, limit=50)
+                summary = await summarize_session(sid, interactions)
+                if summary:
+                    store_session_summary(sid, summary)
+            await asyncio.gather(*[_summarize_one(s) for s in active], return_exceptions=True)
+    except Exception as _se:
+        logger.warning("[SHUTDOWN] Session summarization failed: %s", _se)
     monitor.stop()
     proactive_engine.stop()
     proactive_agent.stop()
