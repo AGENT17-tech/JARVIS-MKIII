@@ -39,6 +39,21 @@ async def dispatch(
     system_prompt: str = "",
     stream:        bool = False,
 ) -> str:
+    from config.telemetry import get_tracer
+    _tracer = get_tracer("jarvis.dispatcher")
+    with _tracer.start_as_current_span("llm_dispatch") as _span:
+        _span.set_attribute("tier", tier.value)
+        _span.set_attribute("prompt.length", len(prompt))
+        return await _dispatch_inner(prompt, tier, history, system_prompt, stream)
+
+
+async def _dispatch_inner(
+    prompt:        str,
+    tier:          TaskTier,
+    history:       list[dict],
+    system_prompt: str = "",
+    stream:        bool = False,
+) -> str:
     messages = [m for m in history if m.get("role") in ("user", "assistant")]
     messages += [{"role": "user", "content": prompt}]
     system   = system_prompt or _default_system(

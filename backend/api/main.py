@@ -44,6 +44,7 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 _START_TIME = _time.time()   # track uptime for /diagnostic
+_telegram_gateway = None     # set in lifespan if Telegram configured
 
 # ── Watchdog alert store ───────────────────────────────────────────────────────
 _alert_store: deque[dict] = deque(maxlen=50)
@@ -106,6 +107,31 @@ async def lifespan(app: FastAPI):
     # Start autonomous proactive agent (new — unified 60s scan, weather, WhatsApp, history API)
     from agents.proactive_agent import agent as proactive_agent
     proactive_agent.start()
+    # Start Telegram gateway if configured
+    global _telegram_gateway
+    _telegram_gateway = None
+    try:
+        from config.settings import TELEGRAM_CFG
+        if TELEGRAM_CFG.enabled and TELEGRAM_CFG.bot_token:
+            from integrations.telegram_gateway import TelegramGateway
+
+            async def _tg_chat_fn(text: str, session_id: str) -> str:
+                from core.router import classify
+                from core.dispatcher import dispatch
+                tier = classify(text).tier
+                hist = memory.get_context(session_id)
+                return await dispatch(text, tier=tier, history=hist)
+
+            _telegram_gateway = TelegramGateway(
+                token               = TELEGRAM_CFG.bot_token,
+                authorized_chat_id  = TELEGRAM_CFG.authorized_chat_id,
+                chat_fn             = _tg_chat_fn,
+            )
+            asyncio.create_task(_telegram_gateway.start())
+            logger.info("[TELEGRAM] Gateway wired into lifespan.")
+    except Exception as _tge:
+        logger.warning("[TELEGRAM] Gateway failed to start: %s", _tge)
+
     # Start Cloudflare Quick Tunnel for remote mobile access
     asyncio.get_event_loop().run_in_executor(None, _tunnel.start)
     # Announce tunnel online via TTS (runs in background — waits up to 25s for URL)
@@ -182,10 +208,20 @@ async def lifespan(app: FastAPI):
         await mcp_close_all()
     except Exception:
         pass
+    # Telegram gateway shutdown
+    if _telegram_gateway is not None:
+        await _telegram_gateway.stop()
     _tunnel.stop()
 
 
-app = FastAPI(title="JARVIS-MKIII", version="3.3.0", lifespan=lifespan)
+app = FastAPI(title="JARVIS-MKIII", version="3.5.0", lifespan=lifespan)
+
+# ── OpenTelemetry tracing ─────────────────────────────────────────────────────
+try:
+    from config.telemetry import setup_telemetry
+    setup_telemetry(app)
+except Exception as _te:
+    logger.warning("[TELEMETRY] Could not setup telemetry: %s", _te)
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 limiter = Limiter(key_func=get_remote_address)
@@ -229,6 +265,56 @@ async def mobile_manifest():
 @app.get("/mobile/sw.js", include_in_schema=False)
 async def mobile_sw():
     return FileResponse(os.path.join(_MOBILE_DIR, "sw.js"), media_type="application/javascript")
+
+
+class _PushPayload(BaseModel):
+    title: str
+    body:  str
+    icon:  str = "jarvis_icon.png"
+
+@app.post("/mobile/push", tags=["mobile"])
+async def mobile_push(payload: _PushPayload):
+    """Send a Web Push notification to registered mobile subscribers."""
+    try:
+        from config.settings import MOBILE_CFG
+        if not MOBILE_CFG.push_enabled:
+            return {"status": "disabled", "message": "Push notifications not enabled in config."}
+        # pywebpush integration — subscriptions stored in vault
+        from core.vault import Vault
+        _v = Vault()
+        subscriptions_raw = _v.get("PUSH_SUBSCRIPTIONS") or "[]"
+        import json as _json
+        subscriptions = _json.loads(subscriptions_raw) if subscriptions_raw else []
+        if not subscriptions:
+            return {"status": "no_subscribers", "sent": 0}
+        from pywebpush import webpush, WebPushException
+        sent = 0
+        for sub in subscriptions:
+            try:
+                webpush(
+                    subscription_info=sub,
+                    data=_json.dumps({"title": payload.title, "body": payload.body, "icon": payload.icon}),
+                    vapid_private_key=MOBILE_CFG.vapid_private_key,
+                    vapid_claims={"sub": f"mailto:{MOBILE_CFG.vapid_email}"},
+                )
+                sent += 1
+            except WebPushException as exc:
+                logger.warning("[PUSH] Failed for subscription: %s", exc)
+        return {"status": "sent", "sent": sent, "total": len(subscriptions)}
+    except Exception as exc:
+        logger.error("[PUSH] Push error: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+@app.get("/telemetry/summary", tags=["telemetry"])
+async def telemetry_summary(limit: int = 100):
+    """Return the last N recorded OpenTelemetry spans for latency profiling."""
+    try:
+        from config.telemetry import get_recent_spans
+        spans = get_recent_spans(limit=limit)
+        return {"spans": spans, "count": len(spans)}
+    except Exception as exc:
+        return {"spans": [], "count": 0, "error": str(exc)}
 
 
 # ── Tunnel status ──────────────────────────────────────────────────────────────

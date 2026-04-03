@@ -17,10 +17,10 @@ _DISK_THRESH   = 90.0   # %
 _PROC_CPU_HIGH = 20.0   # % — unknown process alert
 _CHECK_INTERVAL = 60    # seconds
 
+logger = logging.getLogger(__name__)
+
 # Known/trusted process names (won't trigger unknown-process alert)
 _TRUSTED = {
-
-logger = logging.getLogger(__name__)
     "systemd", "Xorg", "gnome-shell", "kwin_x11", "kwin_wayland",
     "pulseaudio", "pipewire", "dbus-daemon", "NetworkManager",
     "python3", "python", "uvicorn", "node", "npm", "electron",
@@ -148,6 +148,38 @@ class MonitorAgent:
                 "JARVIS backend service appears to be down on port 8000.",
                 key, critical=True,
             )
+
+        # ── WhatsApp bridge watchdog ───────────────────────────────────────
+        await self._check_whatsapp_bridge()
+
+    _wa_unhealthy_streak: int = 0
+
+    async def _check_whatsapp_bridge(self) -> None:
+        """Check WhatsApp bridge health every 30s; restart after 3 consecutive failures."""
+        import httpx as _httpx
+        from config.settings import WHATSAPP_CFG
+        if not WHATSAPP_CFG.enabled:
+            return
+        key = "wa_bridge_down"
+        try:
+            async with _httpx.AsyncClient(timeout=3.0) as _c:
+                r = await _c.get(f"http://localhost:{WHATSAPP_CFG.bridge_port}/health")
+                data = r.json()
+                wa_status = data.get("status", "unknown")
+                if wa_status == "connected":
+                    self._alerted.discard(key)
+                    MonitorAgent._wa_unhealthy_streak = 0
+                    return
+        except Exception:
+            pass
+        MonitorAgent._wa_unhealthy_streak += 1
+        logger.warning("[MONITOR] WhatsApp bridge unhealthy (streak=%d)", MonitorAgent._wa_unhealthy_streak)
+        if MonitorAgent._wa_unhealthy_streak >= 3:
+            await self._alert(
+                "WhatsApp bridge is unresponsive — it may need to be restarted.",
+                key, critical=False,
+            )
+            MonitorAgent._wa_unhealthy_streak = 0
 
     # ── Alert dispatch ────────────────────────────────────────────────────────
     async def _alert(self, message: str, key: str, critical: bool = False):

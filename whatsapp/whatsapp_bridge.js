@@ -20,9 +20,10 @@ const axios   = require('axios');
 const fs      = require('fs');
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const BRIDGE_PORT      = 3001;
+const BRIDGE_PORT      = parseInt(process.env.WA_BRIDGE_PORT || '3001', 10);
 const BACKEND_URL      = 'http://localhost:8000';
 const MAX_RECONNECTS   = 3;
+const SESSION_DIR      = process.env.WA_SESSION_DIR || './whatsapp_session';
 const RATE_LIMIT_FILE  = './rate_limited.json';
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -63,7 +64,7 @@ async function postToBackend(path, data, retries = 3) {
 
 // ── WhatsApp connection ───────────────────────────────────────────────────────
 async function connectToWhatsApp() {
-    const { state, saveCreds } = await useMultiFileAuthState('./baileys_auth');
+    const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
 
     sock = makeWASocket({
         auth: state,
@@ -178,6 +179,11 @@ app.post('/send', async (req, res) => {
 // GET /messages — recent received messages
 app.get('/messages', (req, res) => {
     res.json(messageQueue);
+});
+
+// GET /health — watchdog-compatible health endpoint
+app.get('/health', (req, res) => {
+    res.json({ status });
 });
 
 app.listen(BRIDGE_PORT, () => {

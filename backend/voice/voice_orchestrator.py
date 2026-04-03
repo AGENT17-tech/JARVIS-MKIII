@@ -193,14 +193,19 @@ class VoiceOrchestrator:
     # ── MKIII query ───────────────────────────────────────────────────────────
 
     async def _query_mkiii(self, prompt: str) -> None:
+        from config.telemetry import get_tracer
+        _tracer = get_tracer("jarvis.voice")
         MAX_RETRIES = 3
         for attempt in range(MAX_RETRIES):
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    r = await client.post(
-                        f"{API_BASE}/chat",
-                        json={"prompt": prompt, "session_id": SESSION_ID},
-                    )
+                with _tracer.start_as_current_span("stt_to_chat") as _span:
+                    _span.set_attribute("transcript.length", len(prompt))
+                    _span.set_attribute("attempt", attempt)
+                    async with httpx.AsyncClient(timeout=15.0) as client:
+                        r = await client.post(
+                            f"{API_BASE}/chat",
+                            json={"prompt": prompt, "session_id": SESSION_ID},
+                        )
                     if r.status_code != 200:
                         logger.info(f"[VOICE] Chat returned {r.status_code} (attempt {attempt+1})")
                         await asyncio.sleep(2)
@@ -212,6 +217,8 @@ class VoiceOrchestrator:
                     data = r.json()
                     text = data.get("response", "")
                     tier = data.get("tier", "voice")
+                    _span.set_attribute("response.length", len(text))
+                    _span.set_attribute("tier", tier)
                     if text:
                         self._send_hud(f"voice:response:{text}")
                         logger.info(f"[VOICE] [{tier.upper()}] {text}")

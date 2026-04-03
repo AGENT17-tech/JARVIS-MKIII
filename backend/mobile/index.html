@@ -241,9 +241,33 @@
   #chat-feed::-webkit-scrollbar { width:3px; }
   #chat-feed::-webkit-scrollbar-track { background:transparent; }
   #chat-feed::-webkit-scrollbar-thumb { background:rgba(0,180,255,0.2); border-radius:2px; }
+
+  /* ── OFFLINE BANNER ─────────────────────────────────── */
+  #offline-banner {
+    display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 998;
+    background: rgba(255,136,0,0.92); backdrop-filter: blur(8px);
+    color: #fff; font-size: 11px; letter-spacing: 2px; font-weight: 700;
+    text-align: center; padding: 8px;
+  }
+  #offline-banner.show { display: block; }
+
+  /* ── MIC BUTTON ─────────────────────────────────────── */
+  #mic-btn {
+    flex-shrink: 0;
+    width: 44px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,20,50,0.8); border: 1px solid rgba(0,212,255,0.35);
+    border-radius: 50%; cursor: pointer; transition: all 0.15s; font-size: 20px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #mic-btn:active { transform: scale(0.92); }
+  #mic-btn.listening { border-color: #ff4444; background: rgba(255,40,40,0.2); animation: pulse 1s infinite; }
 </style>
 </head>
 <body>
+
+<!-- OFFLINE BANNER -->
+<div id="offline-banner">JARVIS OFFLINE — CACHED MODE</div>
 
 <!-- TOKEN GATE -->
 <div id="token-gate">
@@ -314,6 +338,7 @@
 
   <!-- INPUT ROW -->
   <div id="input-row">
+    <div id="mic-btn" title="Voice input" onclick="toggleMic()">🎙</div>
     <textarea id="msg-input" placeholder="Message JARVIS..." rows="1"></textarea>
     <button id="send-btn">SEND</button>
   </div>
@@ -336,6 +361,67 @@ const BASE      = window.location.origin;
 const SESSION   = 'mobile-' + Math.random().toString(36).slice(2,8);
 const TOKEN_KEY = 'jarvis_token';
 let   TOKEN     = '';
+
+// ── Offline detection ────────────────────────────────────────────────────────
+const offlineBanner = document.getElementById('offline-banner');
+function setOnline()  { offlineBanner.classList.remove('show'); }
+function setOffline() { offlineBanner.classList.add('show'); }
+window.addEventListener('online',  setOnline);
+window.addEventListener('offline', setOffline);
+if (!navigator.onLine) setOffline();
+
+// ── Voice / Mic ───────────────────────────────────────────────────────────────
+let _recognition = null;
+let _micActive   = false;
+const micBtn   = document.getElementById('mic-btn');
+const msgInput = document.getElementById('msg-input');
+
+function toggleMic() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    // Fallback: focus text input
+    msgInput.focus();
+    return;
+  }
+  if (_micActive && _recognition) {
+    _recognition.stop();
+    return;
+  }
+  _recognition = new SR();
+  _recognition.lang        = 'en-US';
+  _recognition.interimResults = true;
+  _recognition.maxAlternatives = 1;
+
+  _recognition.onstart = () => {
+    _micActive = true;
+    micBtn.classList.add('listening');
+    micBtn.textContent = '🔴';
+  };
+  _recognition.onresult = (e) => {
+    const transcript = Array.from(e.results)
+      .map(r => r[0].transcript).join('');
+    msgInput.value = transcript;
+    msgInput.style.height = 'auto';
+    msgInput.style.height = Math.min(msgInput.scrollHeight, 100) + 'px';
+  };
+  _recognition.onend = () => {
+    _micActive = false;
+    micBtn.classList.remove('listening');
+    micBtn.textContent = '🎙';
+    _recognition = null;
+    // Auto-send if there's content
+    if (msgInput.value.trim()) {
+      document.getElementById('send-btn').click();
+    }
+  };
+  _recognition.onerror = (e) => {
+    _micActive = false;
+    micBtn.classList.remove('listening');
+    micBtn.textContent = '🎙';
+    _recognition = null;
+  };
+  _recognition.start();
+}
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 function savedToken() { return localStorage.getItem(TOKEN_KEY) || ''; }

@@ -231,6 +231,18 @@ class ProactiveAgent:
         except Exception as e:
             logger.error(f"[PROACTIVE] Fire alert failed: {e}")
 
+        # Push to Telegram if gateway is running
+        try:
+            from config.settings import TELEGRAM_CFG
+            if TELEGRAM_CFG.enabled:
+                import api.main as _main_mod
+                _tg = getattr(_main_mod, "_telegram_gateway", None)
+                if _tg is not None:
+                    import asyncio as _asyncio
+                    _asyncio.create_task(_tg.send_proactive(f"[{source.upper()}] {clean}"))
+        except Exception:
+            pass
+
         # Record in Hindsight memory
         try:
             from memory.hindsight import memory

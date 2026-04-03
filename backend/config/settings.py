@@ -70,6 +70,26 @@ class FSConfig(BaseModel):
 class SchedulerConfig(BaseModel):
     db_path: str = "data/scheduled_tasks.db"   # relative to project root
 
+class WhatsAppConfig(BaseModel):
+    enabled:          bool = True
+    bridge_port:      int  = 3001
+    session_dir:      str  = "whatsapp/whatsapp_session"
+    reconnect_delay_s: int = 5
+
+class TelegramConfig(BaseModel):
+    enabled:            bool = False
+    bot_token:          str  = ""   # from env TELEGRAM_BOT_TOKEN
+    authorized_chat_id: int  = 0    # from env TELEGRAM_CHAT_ID — only this ID gets responses
+
+class MCPConfig(BaseModel):
+    enabled: bool = True
+
+class MobileConfig(BaseModel):
+    push_enabled:     bool = False
+    vapid_public_key: str  = ""   # from vault
+    vapid_private_key: str = ""   # from vault
+    vapid_email:      str  = ""
+
 # ── Tool names that the sandbox is allowed to execute ─────────────────────────
 # Any tool name not in this list will be blocked with a warning.
 ALLOWED_TOOLS: list[str] = [
@@ -126,3 +146,11 @@ STT_CFG       = STTConfig()
 BROWSER_CFG   = BrowserConfig()
 FS_CFG        = FSConfig()
 SCHEDULER_CFG = SchedulerConfig()
+WHATSAPP_CFG  = WhatsAppConfig()
+TELEGRAM_CFG  = TelegramConfig(
+    enabled            = os.environ.get("TELEGRAM_BOT_TOKEN", "") != "",
+    bot_token          = os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+    authorized_chat_id = int(os.environ.get("TELEGRAM_CHAT_ID", "0")),
+)
+MCP_CFG       = MCPConfig()
+MOBILE_CFG    = MobileConfig()

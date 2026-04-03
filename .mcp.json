@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "jarvis-mkiii": {
+      "command": "python",
+      "args": ["backend/mcp/run_mcp.py"],
+      "cwd": "."
+    }
+  }
+}
