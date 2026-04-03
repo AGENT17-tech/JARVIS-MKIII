@@ -85,6 +85,40 @@ async def summarize_session_endpoint(body: _SummarizeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@memory_router.get("/agent-results")
+async def agent_results(limit: int = 20):
+    """Return the most recent agent results stored in ChromaDB."""
+    try:
+        from memory.chroma_store import get_store
+        store = get_store()
+        # Query with a broad term — filter by type metadata
+        raw = store._col.get(
+            where={"type": "agent_result"},
+            limit=limit,
+            include=["documents", "metadatas"],
+        )
+        docs      = raw.get("documents") or []
+        metas     = raw.get("metadatas") or []
+        results = [
+            {"content": d, "metadata": m}
+            for d, m in zip(docs, metas)
+        ]
+        return {"results": results, "count": len(results)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@memory_router.get("/tool-history")
+async def tool_history(limit: int = 50):
+    """Return the most recent sandbox tool call audit log."""
+    try:
+        from memory.hindsight import memory
+        rows = memory.get_tool_history(limit=limit)
+        return {"calls": rows, "count": len(rows)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @memory_router.delete("/clear")
 async def memory_clear(confirm: bool = Query(False)):
     """

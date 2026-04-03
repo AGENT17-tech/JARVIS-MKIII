@@ -49,10 +49,19 @@ class Sandbox:
             confirm = input(f"[SANDBOX] Approve '{tool_name}' with args {args}? (y/N): ").strip().lower()
             if confirm != "y":
                 return ToolResult(False, "", tool_name, "Denied by operator.")
+        import time as _time
+        t0 = _time.monotonic()
         try:
-            return await tool["fn"](args)
+            result = await tool["fn"](args)
         except Exception as e:
-            return ToolResult(False, "", tool_name, str(e))
+            result = ToolResult(False, "", tool_name, str(e))
+        duration_ms = int((_time.monotonic() - t0) * 1000)
+        try:
+            from memory.hindsight import memory
+            memory.log_tool_call(tool_name, args, result, duration_ms)
+        except Exception:
+            pass
+        return result
 
     def list_tools(self) -> list[dict]:
         return [{"name": k, "requires_confirmation": v["requires_confirmation"]} for k, v in self._tools.items()]
@@ -117,3 +126,32 @@ async def tool_web_fetch(args: dict) -> ToolResult:
             return ToolResult(True, resp.text[:8000], "web_fetch")
     except Exception as e:
         return ToolResult(False, "", "web_fetch", str(e))
+
+
+@sandbox.register(name="summarize", requires_confirmation=False)
+async def tool_summarize(args: dict) -> ToolResult:
+    """Summarize a block of text via Groq. Accepts 'text' or 'input' key."""
+    text = args.get("text") or args.get("input", "")
+    if not text:
+        return ToolResult(False, "", "summarize", "No text provided.")
+    try:
+        from core.dispatcher import _call_groq
+        prompt = f"Summarize the following in 3 concise bullet points:\n\n{text[:6000]}"
+        summary = await _call_groq([{"role": "user", "content": prompt}], "")
+        return ToolResult(True, summary, "summarize")
+    except Exception as e:
+        return ToolResult(False, "", "summarize", str(e))
+
+
+@sandbox.register(name="vision_analyze", requires_confirmation=False)
+async def tool_vision_analyze(args: dict) -> ToolResult:
+    """Analyze an image (path or base64) via the vision engine. Accepts 'path' or 'input'."""
+    image_path = args.get("path") or args.get("input", "")
+    if not image_path:
+        return ToolResult(False, "", "vision_analyze", "No image path provided.")
+    try:
+        from vision.vision_engine import analyze_screenshot
+        result = await analyze_screenshot(image_path)
+        return ToolResult(True, result, "vision_analyze")
+    except Exception as e:
+        return ToolResult(False, "", "vision_analyze", str(e))

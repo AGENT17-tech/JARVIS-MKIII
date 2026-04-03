@@ -7,6 +7,37 @@ from __future__ import annotations
 import os, platform, re, shutil, socket, subprocess, pathlib, time
 import psutil
 
+# ── Filesystem sandbox ────────────────────────────────────────────────────────
+class PathSandbox:
+    """Validates file paths against the allowed list from FSConfig."""
+
+    def __init__(self):
+        try:
+            from config.settings import FS_CFG
+            self._allowed = FS_CFG.get_allowed_paths()
+        except Exception:
+            self._allowed = [pathlib.Path.home()]
+
+    def validate(self, path: str) -> pathlib.Path:
+        """Resolve `path` and confirm it is inside an allowed root.
+
+        Raises ValueError if the path is outside all allowed roots.
+        """
+        p = pathlib.Path(os.path.expanduser(path)).resolve()
+        for root in self._allowed:
+            try:
+                p.relative_to(root)
+                return p
+            except ValueError:
+                continue
+        raise ValueError(
+            f"Path '{p}' is outside allowed sandbox roots: {self._allowed}"
+        )
+
+
+_path_sandbox = PathSandbox()
+
+
 # ── Result helper ──────────────────────────────────────────────────────────────
 def _R(ok: bool, result: str = "", error: str = "") -> dict:
     return {"success": ok, "result": result, "error": error}

@@ -67,6 +67,16 @@ class LongTermMemory:
                 last_active   REAL NOT NULL,
                 message_count INTEGER DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS tool_calls (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                tool_name   TEXT NOT NULL,
+                args        TEXT NOT NULL,
+                success     INTEGER NOT NULL,
+                output      TEXT NOT NULL,
+                error       TEXT DEFAULT '',
+                duration_ms INTEGER DEFAULT 0,
+                timestamp   REAL NOT NULL
+            );
         """)
         self._conn.commit()
 
@@ -78,6 +88,44 @@ class LongTermMemory:
             )
             self._conn.commit()
             return cur.lastrowid
+
+    def log_tool_call(self, tool_name: str, args: dict, result, duration_ms: int) -> None:
+        import json as _json
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO tool_calls (tool_name, args, success, output, error, duration_ms, timestamp) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    tool_name,
+                    _json.dumps(args, default=str),
+                    1 if result.success else 0,
+                    result.output[:2000],
+                    result.error[:500],
+                    duration_ms,
+                    time.time(),
+                ),
+            )
+            self._conn.commit()
+
+    def get_tool_history(self, limit: int = 50) -> list[dict]:
+        import json as _json
+        rows = self._conn.execute(
+            "SELECT tool_name, args, success, output, error, duration_ms, timestamp "
+            "FROM tool_calls ORDER BY timestamp DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            {
+                "tool_name":   r[0],
+                "args":        _json.loads(r[1]),
+                "success":     bool(r[2]),
+                "output":      r[3],
+                "error":       r[4],
+                "duration_ms": r[5],
+                "timestamp":   r[6],
+            }
+            for r in rows
+        ]
 
     def retrieve(self, query: str, top_k: int = 5) -> list:
         words = set(query.lower().split())
@@ -144,6 +192,12 @@ class HindsightMemory:
         for e in entries:
             lines.append(f"- {e[1]}")
         return "\n".join(lines)
+
+    def log_tool_call(self, tool_name: str, args: dict, result, duration_ms: int) -> None:
+        self.long.log_tool_call(tool_name, args, result, duration_ms)
+
+    def get_tool_history(self, limit: int = 50) -> list[dict]:
+        return self.long.get_tool_history(limit=limit)
 
     def consolidate(self, session_id: str, summary: str, keywords: list) -> None:
         self.long.store(summary, keywords, session_id)

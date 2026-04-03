@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from pydantic import BaseModel
 
 class ModelConfig(BaseModel):
@@ -41,7 +42,35 @@ class BrowserConfig(BaseModel):
     implicit_wait_s:     int  = 5
     driver:              str  = "chrome"
 
-# Tool names that the sandbox is allowed to execute.
+class FSConfig(BaseModel):
+    """Hard filesystem boundary — operations outside these paths are blocked."""
+    resolve_username: bool = True   # auto-fill {username} from os.getlogin()
+
+    def get_allowed_paths(self) -> list[Path]:
+        """Return resolved allowed Path objects. Called at runtime."""
+        paths: list[Path] = []
+        try:
+            username = os.getlogin() if self.resolve_username else os.environ.get("USERNAME", "user")
+        except Exception:
+            username = os.environ.get("USERNAME", "user")
+        project_root = Path(__file__).parent.parent.parent
+
+        candidates = [
+            Path(f"C:/Users/{username}"),
+            Path("C:/tmp"),
+            project_root,
+        ]
+        for p in candidates:
+            try:
+                paths.append(p.resolve())
+            except Exception:
+                pass
+        return paths
+
+class SchedulerConfig(BaseModel):
+    db_path: str = "data/scheduled_tasks.db"   # relative to project root
+
+# ── Tool names that the sandbox is allowed to execute ─────────────────────────
 # Any tool name not in this list will be blocked with a warning.
 ALLOWED_TOOLS: list[str] = [
     "shell",
@@ -63,7 +92,25 @@ ALLOWED_TOOLS: list[str] = [
     "type_text",
     "press_shortcut",
     "youtube_control",
+    # Phase 4 pipeline tools
+    "summarize",
+    "vision_analyze",
+    "run_pipeline",
 ]
+
+# ── Built-in tool pipeline presets ────────────────────────────────────────────
+PIPELINES: dict = {
+    "research_and_brief": [
+        {"tool": "web_scrape",  "args": {},                    "use_previous_output": False},
+        {"tool": "summarize",   "args": {},                    "use_previous_output": True},
+        {"tool": "speak",       "args": {},                    "use_previous_output": True},
+    ],
+    "screen_and_analyze": [
+        {"tool": "screenshot",      "args": {},                "use_previous_output": False},
+        {"tool": "vision_analyze",  "args": {},                "use_previous_output": True},
+        {"tool": "speak",           "args": {},                "use_previous_output": True},
+    ],
+}
 
 LAT  = 30.0444
 LON  = 31.2357
@@ -71,9 +118,11 @@ CITY = "Cairo"
 
 ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
 
-MODEL_CFG   = ModelConfig()
-SERVER_CFG  = ServerConfig()
-MEMORY_CFG  = MemoryConfig()
-WAKE_CFG    = WakeWordConfig()
-STT_CFG     = STTConfig()
-BROWSER_CFG = BrowserConfig()
+MODEL_CFG     = ModelConfig()
+SERVER_CFG    = ServerConfig()
+MEMORY_CFG    = MemoryConfig()
+WAKE_CFG      = WakeWordConfig()
+STT_CFG       = STTConfig()
+BROWSER_CFG   = BrowserConfig()
+FS_CFG        = FSConfig()
+SCHEDULER_CFG = SchedulerConfig()

@@ -23,3 +23,5 @@ pyautogui>=0.9.54
 Pillow>=10.0.0
 pyperclip>=1.8.2
 anthropic>=0.40.0
+python-dateutil>=2.9.0
+apscheduler>=3.10.0

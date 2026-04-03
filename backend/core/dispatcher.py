@@ -48,6 +48,12 @@ async def dispatch(
     if tier == TaskTier.LOCAL:
         return await _call_local(messages, system)
 
+    if tier == TaskTier.SCHEDULED:
+        return await _handle_scheduled(prompt)
+
+    if tier == TaskTier.GOAL:
+        return await _handle_goal(prompt, session_id=None)
+
     if tier == TaskTier.COMPLEX:
         # If the prompt implies tool use, run the ReAct loop; otherwise call Claude directly
         _TOOL_INTENT = re.compile(
@@ -122,6 +128,78 @@ async def _call_claude(messages: list[dict], system: str) -> str:
     except Exception as exc:
         logger.warning("[DISPATCHER] Claude call failed (%s) — falling back to Groq", exc)
         return await _call_groq(messages, system)
+
+
+async def _handle_scheduled(prompt: str) -> str:
+    """Parse scheduling intent from prompt and register with TaskScheduler."""
+    from core.time_parser import parse_time_expression
+    try:
+        from agents.task_scheduler import get_task_scheduler
+        ts = get_task_scheduler()
+    except RuntimeError:
+        return "Scheduler not available yet, sir. Try again in a moment."
+
+    parsed = parse_time_expression(prompt)
+    if parsed is None:
+        return (
+            "I couldn't parse the time expression, sir. "
+            "Try something like 'in 20 minutes' or 'every morning at 7'."
+        )
+
+    try:
+        result = await ts.schedule_reminder(
+            message=prompt,
+            run_at=parsed.get("run_at"),
+            cron=parsed.get("cron"),
+            interval_minutes=parsed.get("interval_minutes"),
+        )
+        sched_for = result.get("scheduled_for", "the specified time")
+        return f"Reminder set for {sched_for}, sir."
+    except Exception as exc:
+        logger.warning("[DISPATCHER] Scheduling failed: %s", exc)
+        return f"I was unable to schedule that, sir. {exc}"
+
+
+async def _handle_goal(prompt: str, session_id: str | None) -> str:
+    """Decompose a multi-step goal via Groq and begin executing step 1."""
+    from core.goal_tracker import get_goal_tracker
+
+    decompose_prompt = (
+        f"Break the following goal into 3 to 5 short, actionable steps. "
+        f"Return ONLY a numbered list, one step per line.\n\nGoal: {prompt}"
+    )
+    try:
+        raw = await _call_groq([{"role": "user", "content": decompose_prompt}], "")
+        steps = [
+            line.lstrip("0123456789.- ").strip()
+            for line in raw.splitlines()
+            if line.strip() and line.strip()[0].isdigit()
+        ]
+        if not steps:
+            steps = [prompt]
+    except Exception as exc:
+        logger.warning("[DISPATCHER] Goal decomposition failed: %s", exc)
+        steps = [prompt]
+
+    tracker = get_goal_tracker()
+    goal = tracker.create_goal(title=prompt[:80], steps=steps)
+
+    # Execute step 1 immediately
+    first_step = goal["steps"][0]
+    tracker.update_step(first_step["step_id"], "running")
+    try:
+        step_result = await _call_groq(
+            [{"role": "user", "content": first_step["description"]}], ""
+        )
+        tracker.update_step(first_step["step_id"], "done", step_result[:500])
+    except Exception as exc:
+        tracker.update_step(first_step["step_id"], "failed", str(exc))
+        step_result = f"Step 1 failed: {exc}"
+
+    return (
+        f"Goal created, sir. {len(steps)} steps identified. "
+        f"Step 1 complete: {step_result[:200]}"
+    )
 
 
 # LOCAL tier routes to LLaVA for vision tasks only

@@ -72,6 +72,8 @@ from api.routers.td import td_router
 from api.routers.memory import memory_router
 from api.routers.phantom import phantom_router
 from api.routers.emotion import emotion_router
+from api.routers.scheduler import scheduler_router
+from api.routers.goals import goals_router
 from tunnel.tunnel_manager import tunnel as _tunnel
 from core.mobile_auth import MobileAuthMiddleware
 from vision.vision_engine import analyze_screenshot as _llava_screenshot
@@ -142,6 +144,11 @@ async def lifespan(app: FastAPI):
         )
         _scheduler.start()
         logger.info("[SCHEDULER] Weekly ChromaDB prune job registered.")
+        # Phase 4: init persistent task scheduler and reload surviving tasks
+        from agents.task_scheduler import init_task_scheduler
+        _ts = init_task_scheduler(_scheduler)
+        _reloaded = await _ts.reload_from_db()
+        logger.info("[SCHEDULER] TaskScheduler init — %d task(s) reloaded.", _reloaded)
     except Exception as _se:
         logger.warning("[SCHEDULER] APScheduler not available — prune job skipped: %s", _se)
     yield
@@ -207,6 +214,8 @@ app.include_router(td_router)        # /td/*
 app.include_router(memory_router)    # /memory/*
 app.include_router(phantom_router)   # /phantom/*
 app.include_router(emotion_router)   # /emotion/*
+app.include_router(scheduler_router) # /scheduler/*
+app.include_router(goals_router)     # /goals/*
 
 # ── Mobile PWA endpoints ───────────────────────────────────────────────────────
 @app.get("/mobile", include_in_schema=False)

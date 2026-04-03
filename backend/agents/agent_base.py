@@ -116,6 +116,26 @@ class AgentBase(ABC):
         except Exception as e:
             logger.error(f"[AGENT:{self.name}] Broadcast failed ({msg_type}): {e}")
 
+    # ── Persistence ───────────────────────────────────────────────────────────
+    async def _persist_result(self, agent_type: str, result: str) -> None:
+        """Store agent result to ChromaDB for future retrieval."""
+        try:
+            from memory.chroma_store import get_store
+            store = get_store()
+            store.add(
+                content=result,
+                metadata={
+                    "type":       "agent_result",
+                    "agent_type": agent_type,
+                    "agent_id":   self.agent_id,
+                    "task":       self.task[:200],
+                },
+                domain="general",
+            )
+            logger.info("[AGENT:%s] Result persisted to ChromaDB", self.name)
+        except Exception as exc:
+            logger.warning("[AGENT:%s] Failed to persist result: %s", self.name, exc)
+
     # ── LLM helper ────────────────────────────────────────────────────────────
     async def _llm(self, prompt: str, system: str = "", max_tokens: int = 1024) -> str:
         """Dispatch to Groq with JARVIS personality. Used by all subclass agents."""

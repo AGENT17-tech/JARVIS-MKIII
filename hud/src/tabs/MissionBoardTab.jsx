@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import MissionBoard from '../MissionBoard'
 
 const T = {
@@ -37,8 +37,22 @@ const ENACTUS_MILESTONES = [
   { label:'Regional pitch',      done:false },
 ]
 
+const STEP_COLOR = { pending:'rgba(0,140,200,0.35)', running:'#ffb900', done:'#00ffc8', failed:'#ff4444' }
+
 export default function MissionBoardTab() {
   const [activeSection, setActiveSection] = useState('phantom')
+  const [activeGoals, setActiveGoals]     = useState([])
+
+  useEffect(() => {
+    const fetchGoals = () =>
+      fetch('/goals/active')
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d) setActiveGoals(d.goals || []) })
+        .catch(() => {})
+    fetchGoals()
+    const id = setInterval(fetchGoals, 15000)
+    return () => clearInterval(id)
+  }, [])
 
   const doneIEEE = IEEE_MILESTONES.filter(m => m.done).length
   const doneEnactus = ENACTUS_MILESTONES.filter(m => m.done).length
@@ -53,6 +67,7 @@ export default function MissionBoardTab() {
           { key:'fitness', label:'FITNESS' },
           { key:'ieee',    label:'IEEE' },
           { key:'enactus', label:'ENACTUS' },
+          { key:'goals',   label:'ACTIVE GOALS' },
         ].map(s => (
           <div key={s.key} onClick={() => setActiveSection(s.key)}
             style={{
@@ -154,6 +169,42 @@ export default function MissionBoardTab() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ACTIVE GOALS */}
+      {activeSection === 'goals' && (
+        <div style={{ flex:1, overflow:'auto', scrollbarWidth:'none', display:'flex', flexDirection:'column', gap:10 }}>
+          {activeGoals.length === 0 ? (
+            <div style={{ ...T.panel, padding:'22px 18px', textAlign:'center' }}>
+              <div style={{ ...T.dim, fontSize:10 }}>NO ACTIVE GOALS</div>
+            </div>
+          ) : activeGoals.map(goal => {
+            const done  = goal.steps.filter(s => s.status === 'done').length
+            const total = goal.steps.length
+            const pct   = total > 0 ? Math.round(done / total * 100) : 0
+            return (
+              <div key={goal.goal_id} style={{ ...T.panel, padding:'14px 18px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                  <div style={{ ...T.title, fontSize:8, maxWidth:'80%' }}>{goal.title}</div>
+                  <div style={{ fontFamily:'Orbitron', fontSize:14, fontWeight:700, color:'#aa88ff' }}>{pct}%</div>
+                </div>
+                <div style={{ height:3, background:'rgba(0,212,255,0.1)', borderRadius:2, overflow:'hidden', marginBottom:10 }}>
+                  <div style={{ height:'100%', width:`${pct}%`, background:'#aa88ff', boxShadow:'0 0 8px #aa88ff', borderRadius:2 }}/>
+                </div>
+                <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                  {goal.steps.map(s => (
+                    <div key={s.step_id} style={{ display:'flex', alignItems:'flex-start', gap:8 }}>
+                      <div style={{ width:8, height:8, borderRadius:'50%', background: STEP_COLOR[s.status] || '#555', flexShrink:0, marginTop:3 }}/>
+                      <span style={{ fontFamily:'Share Tech Mono', fontSize:9, color:'rgba(160,215,255,0.75)', lineHeight:1.5 }}>
+                        {s.step_num}. {s.description}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
